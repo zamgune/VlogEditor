@@ -1,0 +1,50 @@
+{
+  "name": "vlogtool",
+  "version": "0.3.0",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "https://github.com/zamgune/VlogEditor.git" },
+  "private": true,
+  "description": "Local Windows vlog editor with captions and microphone narration",
+  "type": "module",
+  "main": "dist-electron/main.cjs",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "setup:ffmpeg": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-ffmpeg.ps1",
+    "setup:electron": "node node_modules/electron/install.js",
+    "build": "tsc --noEmit && vite build && node scripts/build-electron.mjs",
+    "package:windows": "npm run build && node scripts/package-windows.mjs",
+    "start": "npm run build && electron .",
+    "test": "tsx --test tests/*.test.ts",
+    "verify:media": "tsx scripts/verify-media.ts",
+    "verify:color": "tsx scripts/verify-color.ts",
+    "test:desktop": "npm run build && tsx scripts/verify-desktop.ts",
+    "test:trim": "npm run build && tsx scripts/verify-trim.ts",
+    "test:font-trim": "npm run build && tsx scripts/verify-font-trim.ts",
+    "test:narration": "npm run build && tsx scripts/verify-narration.ts",
+    "test:move": "npm run build && tsx scripts/verify-move.ts",
+    "verify:canvas": "tsx scripts/verify-canvas.ts",
+    "test:canvas": "npm run build && tsx scripts/verify-canvas-desktop.ts",
+    "test:captions": "npm run build && tsx scripts/verify-captions-desktop.ts",
+    "verify:captions": "npm run build && tsx scripts/verify-captions-render.ts",
+    "test:caption-upgrade": "npm run build && tsx scripts/verify-caption-upgrade.ts",
+    "test:caption-gestures": "npm run build && tsx scripts/verify-caption-gestures.ts"
+  },
+  "dependencies": {
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@types/node": "24.19.0",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "electron": "44.4.5",
+    "esbuild": "0.28.2",
+    "tsx": "4.23.15",
+    "typescript": "7.0.2",
+    "vite": "8.3.1"
+  }
+}

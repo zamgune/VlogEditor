@@ -1,0 +1,45 @@
+import { _electron as electron, expect } from '@playwright/test';
+import { readFile, mkdir, writeFile, stat } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
+import { probe } from '../electron/media';
+const root=resolve('.'), id=`captions-${new Date().toISOString().replace(/[:.]/g,'-')}`;
+const output=join(root,'output/playwright',id), data=join(root,'.vlogtool-test',id);
+await mkdir(output,{recursive:true}); await mkdir(data,{recursive:true});
+const fixture=JSON.parse(await readFile(join(root,'artifacts/latest-media.json'),'utf8'));
+const env=Object.fromEntries(Object.entries(process.env).filter(([k,v])=>v!==undefined&&k!=='ELECTRON_RUN_AS_NODE'));
+const app=await electron.launch({executablePath:join(root,'node_modules/electron/dist/electron.exe'),args:[root],cwd:root,env:{...env,VLOGTOOL_TEST_DATA:data}});
+const page=await app.firstWindow(), errors:string[]=[]; page.on('pageerror',e=>errors.push(e.message));
+async function save(path:string) { await app.evaluate(({dialog},filePath)=>{dialog.showSaveDialog=async()=>({canceled:false,filePath});},path); await page.getByRole('button',{name:'저장 Ctrl S'}).click(); await expect.poll(async()=>{try{return (await stat(path)).size;}catch{return 0;}}).toBeGreaterThan(100); return JSON.parse(await readFile(path,'utf8')); }
+try {
+ await expect(page.getByRole('button',{name:'＋ 영상 가져오기'})).toBeEnabled();
+ await app.evaluate(({dialog},filePaths)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths});},fixture.sourceFiles.slice(0,2));
+ await page.getByRole('button',{name:'＋ 영상 가져오기'}).click(); await expect(page.getByTestId('timeline-clip')).toHaveCount(2,{timeout:60000}); await expect(page.locator('.task-overlay')).toHaveCount(0);
+ await page.getByTestId('timeline-clip').first().click({position:{x:24,y:23}});
+ await page.getByRole('button',{name:'＋ 자막',exact:true}).click(); await expect(page.getByTestId('caption-object')).toHaveCount(1,{timeout:30000});
+ await page.locator('.caption-list textarea').first().fill('오늘도 천천히, 나만의 하루\nHello, Vlog!'); await page.getByRole('heading',{name:'자막 속성'}).click();
+ await page.getByRole('button',{name:'＋ 전체 제목',exact:true}).click(); await expect(page.getByTestId('caption-object')).toHaveCount(2);
+ await page.locator('.caption-list textarea').last().fill('나의 하루 기록'); await page.getByRole('heading',{name:'자막 속성'}).click();
+ await page.getByRole('button',{name:'＋ 강조',exact:true}).click(); await expect(page.getByTestId('caption-object')).toHaveCount(3);
+ await page.getByRole('button',{name:'디자인 노랑 강조'}).click(); await page.screenshot({path:join(output,'01-three-layers.png')});
+ const canvas=page.getByTestId('preview-canvas'), before=(await canvas.boundingBox())!;
+ await page.getByRole('button',{name:'크게 보기',exact:true}).click(); await expect.poll(async()=>(await canvas.boundingBox())!.height).toBeGreaterThan(before.height+40);
+ await page.screenshot({path:join(output,'02-large-preview.png')}); await page.keyboard.press('Escape'); await expect(page.getByRole('button',{name:'크게 보기',exact:true})).toBeVisible();
+ const object=page.getByTestId('caption-object').last(), b=(await object.boundingBox())!;
+ await page.mouse.move(b.x+b.width/2,b.y+b.height/2); await page.mouse.down(); await page.mouse.move(b.x+b.width/2+26,b.y+b.height/2-25,{steps:8}); await page.mouse.up();
+ await expect(page.locator('.caption-scope-hint')).toContainText('선택한 자막');
+ await page.getByRole('tab',{name:'꾸미기',exact:true}).click(); await page.getByRole('button',{name:'자막 아래 중앙',exact:true}).click();
+ await page.getByRole('button',{name:'실행 취소',exact:true}).click();
+ await page.getByRole('button',{name:'같은 종류 모두 크기·위치 맞추기'}).click();
+ await page.getByRole('tab',{name:'스타일',exact:true}).click(); const name=page.getByRole('textbox',{name:'내 자막 설정 이름'}); await name.fill('내 첫 브이로그'); await page.getByRole('button',{name:'현재 스타일 저장'}).click(); await expect(page.getByRole('button',{name:'디자인 내 첫 브이로그',exact:true})).toBeVisible();
+ const saved=join(output,'자막과 제목.vlog.json'); const p=await save(saved); expect(p.version).toBe(6); expect(p.captions.length).toBe(3); expect(p.captions.find((c:any)=>c.kind==='title').clipId).toBeNull();
+ const exported=join(output,'자막과 제목.mp4'); await app.evaluate(({dialog},filePath)=>{dialog.showSaveDialog=async()=>({canceled:false,filePath});},exported);
+ await page.getByRole('button',{name:'내보내기 ↗'}).click(); await expect(page.locator('footer')).toContainText('MP4 내보내기 완료',{timeout:120000});
+ const v=(await probe(root,exported)).streams.find(s=>s.codec_type==='video')!; expect(Number(v.nb_frames)).toBe(p.clips.reduce((sum:number,c:any)=>sum+c.outFrame-c.inFrame,0));
+ await app.evaluate(({dialog},path)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths:[path]});},saved); await page.getByRole('button',{name:'열기',exact:true}).click(); await expect(page.locator('footer')).toContainText('프로젝트 열기 완료');
+ await page.getByRole('button',{name:'자막 목록 · 3'}).click(); await page.locator('.caption-list-item > button').filter({hasText:'제목'}).click();
+ await page.getByRole('button',{name:'자막 삭제 Del'}).click();await expect(page.getByTestId('caption-block')).toHaveCount(2);await expect(page.getByTestId('timeline-clip')).toHaveCount(2);
+ await page.getByRole('button',{name:'실행 취소',exact:true}).click();await expect(page.getByTestId('caption-block')).toHaveCount(3);
+ await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().find(w=>w.isVisible())!.setSize(1100,760));
+ await expect.poll(async()=>{const f=(await page.locator('footer').boundingBox())!;return f.y+f.height<=await page.evaluate(()=>innerHeight);}).toBe(true); await page.screenshot({path:join(output,'03-small-window.png')});
+ expect(errors).toEqual([]); const report={output,data,saved,exported,errors,frames:v.nb_frames}; await writeFile(join(output,'report.json'),JSON.stringify(report,null,2)); await writeFile(join(root,'artifacts/latest-captions-desktop.json'),JSON.stringify(report,null,2)); console.log(JSON.stringify(report));
+} catch(e) { await page.screenshot({path:join(output,'failure.png')}); console.error(await page.locator('body').innerText()); throw e; } finally { await app.close(); }

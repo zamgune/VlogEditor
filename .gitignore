@@ -1,0 +1,14 @@
+node_modules/
+dist/
+dist-electron/
+vendor/ffmpeg/
+vendor/downloads/
+artifacts/
+.vlogtool-test/
+output/
+release/
+.tools/
+*.log
+*.vlog.json
+*.vlog.json.assets/
+windows_vlog_editor_build_prompt.md
