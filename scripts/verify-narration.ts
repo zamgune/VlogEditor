@@ -57,7 +57,7 @@ try {
   expect(await page.evaluate(() => (window as any).testMic.getTracks().every((t: MediaStreamTrack) => t.readyState === 'ended'))).toBe(true);
   await expect(page.getByTestId('narration-block')).toHaveCount(1);
   const saved = join(out, '목소리 프로젝트.vlog.json'), project = await save(saved);
-  expect(project.version).toBe(6); expect(project.narrations).toHaveLength(1); expect(project.narrations[0].startFrame).toBe(90); expect(project.narrations[0].durationFrames).toBe(150);
+  expect(project.version).toBe(7); expect(project.narrations).toHaveLength(1); expect(project.narrations[0].startFrame).toBe(90); expect(project.narrations[0].durationFrames).toBe(150);
   expect(project.narrations[0].path).toContain('.vlog.json.assets');
   const originalExport = await exported('녹음 포함');
   const levels = { before: await amplitude(originalExport, 2, 997), during: await amplitude(originalExport, 3.5, 997), afterCut: await amplitude(originalExport, 5, 997), original: await amplitude(originalExport, 1, 440) };

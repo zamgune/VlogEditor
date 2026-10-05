@@ -72,13 +72,53 @@ export const defaultCaptionSettings = () => ({ normal: structuredClone(CAPTION_P
 export const CaptionSettingsSchema = z.object({ normal: CaptionStyleSchema, emphasis: CaptionStyleSchema, title: CaptionStyleSchema, margins: MarginsSchema }).strict();
 export const SavedCaptionStyleSchema = z.object({ id: z.string().uuid(), name: z.string().min(1).max(80), style: CaptionStyleSchema }).strict();
 export type SavedCaptionStyle = z.infer<typeof SavedCaptionStyleSchema>;
-const LibrarySchema = z.object({ version: z.literal(1), styles: z.array(SavedCaptionStyleSchema).max(100), favorites: z.array(z.string().max(100)).max(120) }).strict().superRefine((library, ctx) => {
+export const CaptionGroupItemSchema = z.object({ kind: CaptionKindSchema, text: z.string().max(2000), style: CaptionStyleSchema,
+  startFrame: z.number().int().min(0).max(2592000), endFrame: z.number().int().min(0).max(2592000)
+}).strict().refine(item => item.kind === 'title' ? item.startFrame === 0 && item.endFrame === 0 : item.endFrame > item.startFrame, '그룹의 표시 구간이 올바르지 않습니다.');
+export const SavedCaptionGroupSchema = z.object({ id: z.string().uuid(), name: z.string().trim().min(1).max(80), items: z.array(CaptionGroupItemSchema).min(1).max(50) }).strict();
+export type SavedCaptionGroup = z.infer<typeof SavedCaptionGroupSchema>;
+const LibrarySchema = z.object({ version: z.literal(2), styles: z.array(SavedCaptionStyleSchema).max(100), favorites: z.array(z.string().max(100)).max(120), groups: z.array(SavedCaptionGroupSchema).max(50) }).strict().superRefine((library, ctx) => {
   const valid = new Set([...CAPTION_PRESETS.map(p => `builtin:${p.id}`), ...library.styles.map(p => `user:${p.id}`)]);
   if (new Set(library.styles.map(p => p.id)).size !== library.styles.length || new Set(library.favorites).size !== library.favorites.length || library.favorites.some(id => !valid.has(id))) ctx.addIssue({ code: 'custom', message: '스타일 보관함 항목이 올바르지 않습니다.' });
+  if (new Set(library.groups.map(g => g.id)).size !== library.groups.length) ctx.addIssue({ code: 'custom', message: '중복된 그룹입니다.' });
 });
-export const CaptionLibrarySchema = z.preprocess(value => Array.isArray(value) ? { version: 1, styles: value, favorites: [] } : value, LibrarySchema);
+export const CaptionLibrarySchema = z.preprocess(value => {
+  if (Array.isArray(value)) return { version: 2, styles: value, favorites: [], groups: [] };
+  if (value && typeof value === 'object' && 'version' in value && value.version === 1) return { ...value, version: 2, groups: [] };
+  return value;
+}, LibrarySchema);
 export type CaptionLibrary = z.infer<typeof CaptionLibrarySchema>;
-export const emptyCaptionLibrary = (): CaptionLibrary => ({ version: 1, styles: [], favorites: [] });
+export const emptyCaptionLibrary = (): CaptionLibrary => ({ version: 2, styles: [], favorites: [], groups: [] });
+
+export function captureCaptionGroup(p: Project, ids: string[], name: string): SavedCaptionGroup {
+  const selected = new Set(ids), visible = new Set(captionSpans(p).map(s => s.caption.id));
+  const captions = p.captions.filter(c => selected.has(c.id)).sort((a, b) => a.zOrder - b.zOrder);
+  if (!captions.length || captions.length > 50 || captions.some(c => !visible.has(c.id))) throw new Error('화면에 표시되는 글을 1~50개 선택해 주세요.');
+  return SavedCaptionGroupSchema.parse({ id: crypto.randomUUID(), name, items: captions.map(c => {
+    const style = structuredClone(effectiveStyle(p, c));
+    const anchor = captionRect({ width: 0, height: 0 }, style, p.settings, p.captionSettings.margins);
+    style.position = { ...style.position, x: anchor.left / p.settings.width, y: anchor.top / p.settings.height };
+    const clip = p.clips.find(v => v.id === c.clipId);
+    return { kind: c.kind, text: c.text, style,
+      startFrame: clip ? Math.max(c.inFrame, clip.inFrame) - clip.inFrame : 0,
+      endFrame: clip ? Math.min(c.outFrame, clip.outFrame) - clip.inFrame : 0 };
+  }) });
+}
+export function applyCaptionGroup(p: Project, input: SavedCaptionGroup, clipId?: string): { project: Project; ids: string[] } {
+  const group = SavedCaptionGroupSchema.parse(input), clip = p.clips.find(c => c.id === clipId);
+  if (!p.clips.length || (group.items.some(i => i.kind !== 'title') && !clip)) throw new Error('그룹을 넣을 영상을 먼저 선택해 주세요.');
+  if (p.captions.length + group.items.length > 2000) throw new Error('프로젝트에는 글을 최대 2000개까지 넣을 수 있습니다.');
+  const order = nextOrder(p);
+  const added: Caption[] = group.items.map((item, i) => {
+    const length = clip ? clip.outFrame - clip.inFrame : 0;
+    const start = Math.min(item.startFrame, Math.max(0, length - 1));
+    const end = Math.max(start + 1, Math.min(item.endFrame, length));
+    return { id: crypto.randomUUID(), kind: item.kind, text: item.text, clipId: item.kind === 'title' ? null : clip!.id,
+      inFrame: item.kind === 'title' ? 0 : clip!.inFrame + start, outFrame: item.kind === 'title' ? 0 : clip!.inFrame + end,
+      zOrder: order + i, overrides: structuredClone(item.style) };
+  });
+  return { project: { ...p, captions: [...p.captions, ...added] }, ids: added.map(c => c.id) };
+}
 export function presetPatch(style: CaptionStyle, includeLayout = false): Partial<CaptionStyle> {
   const copy = structuredClone(style);
   if (includeLayout) return copy;
@@ -117,13 +157,13 @@ export function captionSpans(p: Project) {
 }
 export function addCaption(p: Project, clipId: string, kind: CaptionKind, sourceFrame: number): { project: Project; id: string } {
   if (kind === 'title') {
-    const old = p.captions.find(c => c.kind === 'title'); if (old) return { project: p, id: old.id };
     const c: Caption = { id: crypto.randomUUID(), clipId: null, kind, text: '나의 하루 기록', inFrame: 0, outFrame: 0, zOrder: nextOrder(p), overrides: {} };
+    c.overrides = offsetNewCaption(p, c);
     return { project: { ...p, captions: [...p.captions, c] }, id: c.id };
   }
   const clip = p.clips.find(c => c.id === clipId)!;
-  const at = Math.max(clip.inFrame, Math.min(clip.outFrame - 1, sourceFrame));
-  const caption: Caption = { id: crypto.randomUUID(), clipId, kind, text: kind === 'normal' ? '오늘의 작은 순간' : '이 순간!', inFrame: kind === 'normal' ? clip.inFrame : at, outFrame: kind === 'normal' ? clip.outFrame : Math.min(clip.outFrame, at + 60), zOrder: nextOrder(p), overrides: {} };
+  const at = Math.max(clip.inFrame, Math.min(clip.outFrame - 1, Math.round(sourceFrame)));
+  const caption: Caption = { id: crypto.randomUUID(), clipId, kind, text: kind === 'normal' ? '오늘의 작은 순간' : '이 순간!', inFrame: at, outFrame: kind === 'normal' ? clip.outFrame : Math.min(clip.outFrame, at + 60), zOrder: nextOrder(p), overrides: {} };
   caption.overrides = offsetNewCaption(p, caption);
   return { project: { ...p, captions: [...p.captions, caption] }, id: caption.id };
 }
@@ -133,8 +173,8 @@ export function splitCaption(p: Project, id: string, sourceFrame: number): Proje
   return { ...p, captions: p.captions.flatMap(c => c.id !== id ? [c] : [{ ...c, outFrame: sourceFrame }, { ...c, id: crypto.randomUUID(), inFrame: sourceFrame }]) };
 }
 export function captionRange(p: Project, id: string, a: number, b: number): Project {
-  const c = p.captions.find(c => c.id === id)!; if (c.kind === 'title') return p;
-  const clip = p.clips.find(v => v.id === c.clipId)!;
+  const c = p.captions.find(c => c.id === id); if (!c || c.kind === 'title' || !Number.isFinite(a) || !Number.isFinite(b)) return p;
+  const clip = p.clips.find(v => v.id === c.clipId); if (!clip) return p;
   const min = clip.inFrame, max = clip.outFrame;
   a = Math.max(min, Math.min(max - 1, Math.round(a))); b = Math.max(a + 1, Math.min(max, Math.round(b)));
   return a === c.inFrame && b === c.outFrame ? p : { ...p, captions: p.captions.map(v => v.id === id ? { ...v, inFrame: a, outFrame: b } : v) };
@@ -143,7 +183,7 @@ export function captionRange(p: Project, id: string, a: number, b: number): Proj
 const nextOrder = (p: Project) => Math.max(-1, ...p.captions.map(c => c.zOrder)) + 1;
 function offsetNewCaption(p: Project, caption: Caption): Partial<CaptionStyle> {
   const style = effectiveStyle(p, caption), rect = captionRect({ width: 0, height: 0 }, style, p.settings, p.captionSettings.margins);
-  const siblings = p.captions.filter(c => c.clipId === caption.clipId && c.inFrame < caption.outFrame && c.outFrame > caption.inFrame);
+  const siblings = p.captions.filter(c => c.clipId === caption.clipId && (caption.kind === 'title' || (c.inFrame < caption.outFrame && c.outFrame > caption.inFrame)));
   let x = rect.left / p.settings.width, y = rect.top / p.settings.height;
   const step = Math.max(.045, (style.size * style.lineHeight + style.padding * 2 + 12) * Math.min(p.settings.width, p.settings.height) / 1080 / p.settings.height);
   for (let i = 0; i < siblings.length + 1; i++) {
@@ -157,7 +197,7 @@ function offsetNewCaption(p: Project, caption: Caption): Partial<CaptionStyle> {
 }
 export function duplicateCaption(p: Project, id: string): { project: Project; id: string } {
   const source = p.captions.find(c => c.id === id);
-  if (!source || source.kind === 'title' || p.captions.length >= 2000) return { project: p, id };
+  if (!source || p.captions.length >= 2000) return { project: p, id };
   const copy = { ...structuredClone(source), id: crypto.randomUUID(), zOrder: nextOrder(p) };
   copy.overrides = offsetNewCaption(p, copy);
   return { project: { ...p, captions: [...p.captions, copy] }, id: copy.id };

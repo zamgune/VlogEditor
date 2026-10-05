@@ -67,7 +67,7 @@ try {
  report.checks.push('legacy library migration; favorites; search/categories; saved motion; appearance-only and layout opt-in; rename/overwrite/copy/delete; applied captions detached; percentage opacity/alignment/line spacing; preview playback');
  const stableLibrary=await library();await open(base,'another-project');await page.getByRole('button',{name:'＋ 자막',exact:true}).click();expect(await library()).toEqual(stableLibrary);
  await app.close();app=await launch();page=await app.firstWindow();page.on('pageerror',e=>errors.push(e.message));await page.getByRole('button',{name:'작업 복구'}).click();await expect(page.getByTestId('caption-block')).toHaveCount(1,{timeout:60000});await expect(page.locator('.task-overlay')).toHaveCount(0);await select((await state()).captions[0].id);expect(await library()).toEqual(stableLibrary);
- await page.getByRole('button',{name:'★ 즐겨찾기',exact:true}).click();await expect(page.locator('.caption-preset')).toHaveCount(1);expect(JSON.parse(await readFile(join(data,'caption-presets.json'),'utf8')).version).toBe(1);
+ await page.getByRole('button',{name:'★ 즐겨찾기',exact:true}).click();await expect(page.locator('.caption-preset')).toHaveCount(1);expect(JSON.parse(await readFile(join(data,'caption-presets.json'),'utf8')).version).toBe(2);
  report.checks.push('library survives project switch and application restart');
  const normalized=await state();
  for(const preset of CANVAS_PRESETS){

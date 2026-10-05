@@ -31,7 +31,7 @@ try {
  await page.getByRole('button',{name:'실행 취소',exact:true}).click();
  await page.getByRole('button',{name:'같은 종류 모두 크기·위치 맞추기'}).click();
  await page.getByRole('tab',{name:'스타일',exact:true}).click(); const name=page.getByRole('textbox',{name:'내 자막 설정 이름'}); await name.fill('내 첫 브이로그'); await page.getByRole('button',{name:'현재 스타일 저장'}).click(); await expect(page.getByRole('button',{name:'디자인 내 첫 브이로그',exact:true})).toBeVisible();
- const saved=join(output,'자막과 제목.vlog.json'); const p=await save(saved); expect(p.version).toBe(6); expect(p.captions.length).toBe(3); expect(p.captions.find((c:any)=>c.kind==='title').clipId).toBeNull();
+ const saved=join(output,'자막과 제목.vlog.json'); const p=await save(saved); expect(p.version).toBe(7); expect(p.captions.length).toBe(3); expect(p.captions.find((c:any)=>c.kind==='title').clipId).toBeNull();
  const exported=join(output,'자막과 제목.mp4'); await app.evaluate(({dialog},filePath)=>{dialog.showSaveDialog=async()=>({canceled:false,filePath});},exported);
  await page.getByRole('button',{name:'내보내기 ↗'}).click(); await expect(page.locator('footer')).toContainText('MP4 내보내기 완료',{timeout:120000});
  const v=(await probe(root,exported)).streams.find(s=>s.codec_type==='video')!; expect(Number(v.nb_frames)).toBe(p.clips.reduce((sum:number,c:any)=>sum+c.outFrame-c.inFrame,0));

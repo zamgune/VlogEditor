@@ -6,11 +6,11 @@ const media: Media = { id: crypto.randomUUID(), path: 'C:/fixture.mp4', name: 'f
 const fixture = () => addMedia(newProject(), [media, { ...media, id: crypto.randomUUID() }]);
 test('legacy versions migrate to empty captions with responsive default styles', () => {
   const { captions: _, captionSettings: __, ...old } = fixture();
-  for (const version of [1,2,3]) { const p = ProjectSchema.parse({ ...old, version }); assert.equal(p.version, 6); assert.deepEqual(p.captions, []); assert.equal(p.captionSettings.normal.size, 54); }
+  for (const version of [1,2,3]) { const p = ProjectSchema.parse({ ...old, version }); assert.equal(p.version, 7); assert.deepEqual(p.captions, []); assert.equal(p.captionSettings.normal.size, 54); }
 });
-test('new normal spans clip; emphasis uses 60 frames capped to clip end; overlapping additions are independent', () => {
+test('new captions start at the playhead; normal ends at clip end and emphasis uses up to 60 frames', () => {
   let p = fixture(); const c = p.clips[0]; const a = addCaption(p, c.id, 'normal', 100); p = a.project;
-  assert.deepEqual([p.captions[0].inFrame, p.captions[0].outFrame], [0, 300]); assert.notEqual(addCaption(p,c.id,'normal',200).id,a.id);
+  assert.deepEqual([p.captions[0].inFrame, p.captions[0].outFrame], [100, 300]); assert.notEqual(addCaption(p,c.id,'normal',200).id,a.id);
   p = addCaption(p,c.id,'emphasis',280).project; assert.deepEqual([p.captions[1].inFrame,p.captions[1].outFrame],[280,300]);
 });
 test('caption trim, split and drag allow overlapping siblings but respect the clip', () => {
@@ -20,12 +20,26 @@ test('caption trim, split and drag allow overlapping siblings but respect the cl
   assert.equal(splitCaption(p,a.id,0),p); assert.equal(splitCaption(p,a.id,200),p);
   p = captionRange(p, a.id, -50, 500); assert.deepEqual([p.captions[0].inFrame,p.captions[0].outFrame],[0,300]);
 });
+
+test('sequential and overlapping pairs switch on the exact frame in a trimmed later scene', () => {
+  let p = fixture(); p = trim(p, p.clips[0].id, 0, 30); p = trim(p, p.clips[1].id, 30, 120);
+  const clip = p.clips[1], ids: string[] = [];
+  for (const [start, end] of [[30, 75], [30, 75], [75, 120], [75, 120]]) {
+    const added = addCaption(p, clip.id, 'normal', start); ids.push(added.id); p = captionRange(added.project, added.id, start, end);
+  }
+  const visible = (frame: number) => activeCaptionSpans(p, frame).map(s => s.caption.id);
+  assert.deepEqual(visible(29), []);
+  assert.deepEqual(visible(30), ids.slice(0, 2)); assert.deepEqual(visible(74), ids.slice(0, 2));
+  assert.deepEqual(visible(75), ids.slice(2)); assert.deepEqual(visible(119), ids.slice(2)); assert.deepEqual(visible(120), []);
+  assert.deepEqual(captionSceneBoundaries(p), [0, 30, 75, 120]);
+  assert.deepEqual(ProjectSchema.parse(JSON.parse(JSON.stringify(p))).captions, p.captions);
+});
 test('v4 migration preserves appearance and original normal/title/emphasis order', () => {
   let p=fixture(); for (const kind of ['emphasis','title','normal'] as const) p=addCaption(p,p.clips[0].id,kind,0).project;
   const old=JSON.parse(JSON.stringify({...p,version:4}));
   for(const c of old.captions){delete c.zOrder; c.overrides={};}
   for(const kind of ['normal','emphasis','title']){delete old.captionSettings[kind].motion;delete old.captionSettings[kind].align;delete old.captionSettings[kind].lineHeight;}
-  const next=ProjectSchema.parse(old); assert.equal(next.version,6);
+  const next=ProjectSchema.parse(old); assert.equal(next.version,7);
   assert.deepEqual(activeCaptionSpans(next,0).map(s=>s.caption.kind),['normal','title','emphasis']);
   assert.deepEqual(next.captions[0].overrides,{});assert.equal(next.captionSettings.normal.lineHeight,1.4);assert.deepEqual(next.captionSettings.normal.motion,noMotion());
   assert.deepEqual(ProjectSchema.parse(next),next);
@@ -43,7 +57,7 @@ test('overlapping captions offset, duplicate independently, reorder and pack sep
 });
 test('library migrates legacy styles, validates favorites and returns detached appearance patches', () => {
   const legacy=[{id:crypto.randomUUID(),name:'이전 스타일',style:structuredClone(CAPTION_PRESETS[0].style)}];
-  const library=CaptionLibrarySchema.parse(legacy);assert.equal(library.version,1);assert.deepEqual(library.favorites,[]);
+  const library=CaptionLibrarySchema.parse(legacy);assert.equal(library.version,2);assert.deepEqual(library.favorites,[]);
   assert.equal(CAPTION_PRESETS.length,20);assert.equal(new Set(CAPTION_PRESETS.map(p=>p.id)).size,20);
   library.favorites=['builtin:vlog',`user:${legacy[0].id}`];assert.deepEqual(CaptionLibrarySchema.parse(library),library);
   assert.throws(()=>CaptionLibrarySchema.parse({...library,favorites:['user:missing']}));
@@ -94,9 +108,9 @@ test('video trims hide captions without deleting timing; reorder and removal fol
   p=trim(p,id,0,300); p=moveClip(p,0,1); assert.equal(captionSpans(p)[0].start,300);
   p=removeClip(p,id); assert.equal(p.captions.length,0);
 });
-test('title follows whole timeline, is unique, survives clip edits, cannot split', () => {
+test('multiple titles follow the whole timeline, survive clip edits and cannot split', () => {
   let p=fixture(); const title=addCaption(p,p.clips[0].id,'title',0); p=title.project;
-  assert.equal(addCaption(p,p.clips[1].id,'title',200).id,title.id); assert.equal(splitCaption(p,title.id,100),p);
+  const second=addCaption(p,p.clips[1].id,'title',200); assert.notEqual(second.id,title.id); p=second.project; assert.equal(p.captions.length,2); assert.equal(splitCaption(p,title.id,100),p);
   p=removeClip(p,p.clips[0].id); assert.equal(captionSpans(p)[0].end,duration(p)); ProjectSchema.parse(p);
 });
 test('common edits preserve local position and inherit other fields', () => {

@@ -29,7 +29,9 @@
     "test:captions": "npm run build && tsx scripts/verify-captions-desktop.ts",
     "verify:captions": "npm run build && tsx scripts/verify-captions-render.ts",
     "test:caption-upgrade": "npm run build && tsx scripts/verify-caption-upgrade.ts",
-    "test:caption-gestures": "npm run build && tsx scripts/verify-caption-gestures.ts"
+    "test:caption-gestures": "npm run build && tsx scripts/verify-caption-gestures.ts",
+    "test:caption-groups": "npm run build && tsx scripts/verify-caption-groups.ts",
+    "test:caption-timing": "npm run build && tsx scripts/verify-caption-timing.ts"
   },
   "dependencies": {
     "react": "19.3.0",

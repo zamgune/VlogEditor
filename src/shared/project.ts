@@ -18,7 +18,7 @@ export const MediaSchema = z.object({
 }).strict();
 export const ClipSchema = z.object({ id, mediaId: id, inFrame: frame, outFrame: frame, volume: z.number().min(0).max(1), color: ColorSchema.default(() => ({ ...NEUTRAL_COLOR })), framing: FramingSchema.default(() => ({ ...DEFAULT_FRAMING })) }).strict();
 export const ProjectSchema = z.object({
-  format: z.literal('vlogtool'), version: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5), z.literal(6)]), id,
+  format: z.literal('vlogtool'), version: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5), z.literal(6), z.literal(7)]), id,
   name: z.string().min(1).max(200),
   settings: CanvasSettingsSchema,
   media: z.array(MediaSchema).max(200), clips: z.array(ClipSchema).max(200),
@@ -36,7 +36,7 @@ export const ProjectSchema = z.object({
   if (new Set(p.narrations.map(n => n.id)).size !== p.narrations.length) ctx.addIssue({ code: 'custom', message: '중복된 녹음 ID입니다.' });
   for (const c of p.captions) {
     if (c.kind === 'title') {
-      if (ids.has(c.id) || c.clipId !== null || c.inFrame !== 0 || c.outFrame !== 0 || p.captions.filter(v => v.kind === 'title').length > 1) ctx.addIssue({ code: 'custom', message: '전체 제목이 올바르지 않습니다.' });
+      if (ids.has(c.id) || c.clipId !== null || c.inFrame !== 0 || c.outFrame !== 0) ctx.addIssue({ code: 'custom', message: '전체 제목이 올바르지 않습니다.' });
       ids.add(c.id); continue;
     }
     const clip = p.clips.find(v => v.id === c.clipId), media = p.media.find(m => m.id === clip?.mediaId);
@@ -45,16 +45,16 @@ export const ProjectSchema = z.object({
     ids.add(c.id);
   }
 }).transform(p => {
-  if (p.version >= 5) return { ...p, version: 6 as const };
+  if (p.version >= 5) return { ...p, version: 7 as const };
   const rank = { normal: 0, title: 1, emphasis: 2 };
   const order = new Map([...p.captions].sort((a, b) => rank[a.kind] - rank[b.kind]).map((c, i) => [c.id, i]));
-  return { ...p, version: 6 as const, captions: p.captions.map(c => ({ ...c, zOrder: order.get(c.id)! })) };
+  return { ...p, version: 7 as const, captions: p.captions.map(c => ({ ...c, zOrder: order.get(c.id)! })) };
 });
 export type Media = z.infer<typeof MediaSchema>;
 export type Clip = z.infer<typeof ClipSchema>;
 export type Project = z.infer<typeof ProjectSchema>;
 export function newProject(preset: CanvasPresetId = '9:16'): Project {
-  return { format: 'vlogtool', version: 6, id: crypto.randomUUID(), name: '나의 첫 브이로그',
+  return { format: 'vlogtool', version: 7, id: crypto.randomUUID(), name: '나의 첫 브이로그',
     settings: canvasSettings(preset), media: [], clips: [], captions: [], captionSettings: defaultCaptionSettings(), narrations: [] };
 }
 export const duration = (p: Project) => p.clips.reduce((sum, c) => sum + c.outFrame - c.inFrame, 0);

@@ -4,12 +4,12 @@ import { CANVAS_PRESETS, CanvasSettingsSchema, DEFAULT_FRAMING, FramingSchema, c
 import { addMedia, commit, newProject, ProjectSchema, redo, split, undo, type Media } from '../src/shared/project';
 
 const media: Media = { id: crypto.randomUUID(), path: 'C:\\portrait.mp4', name: 'portrait.mp4', fingerprint: 'canvas', durationFrames: 90, width: 1080, height: 1920, displayWidth: 1080, displayHeight: 1920, codec: 'h264', sourceFps: 30, timeBase: '1/30', startTime: 0, rotation: 0, hasAudio: true, warnings: [] };
-test('new projects are portrait; legacy wide projects retain framing and migrate to v6', () => {
+test('new projects are portrait; legacy wide projects retain framing and migrate to v7', () => {
   assert.equal(newProject().settings.height, 1920);
   const old = addMedia(newProject('16:9'), [media]);
   const input = { ...old, version: 2, settings: { width: 1920, height: 1080, fps: 30, color: 'SDR' }, clips: old.clips.map(({ framing: _, ...c }) => c) };
   const migrated = ProjectSchema.parse(input);
-  assert.equal(migrated.version, 6); assert.deepEqual(migrated.settings, canvasSettings('16:9'));
+  assert.equal(migrated.version, 7); assert.deepEqual(migrated.settings, canvasSettings('16:9'));
   assert.deepEqual(migrated.clips[0].framing, DEFAULT_FRAMING);
   assert.equal(migrated.clips[0].outFrame, 90);
 });

@@ -10,7 +10,7 @@ import { atomicSave, readProject, withPortableNarrations } from '../electron/sto
 const take = (patch: Partial<Narration> = {}): Narration => ({ id: crypto.randomUUID(), name: '음성 1', path: 'C:/voice.wav', fingerprint: 'a'.repeat(64), durationFrames: 120, startFrame: 30, inFrame: 0, outFrame: 120, volume: .7, muted: false, ...patch });
 test('legacy projects gain an empty voice track and recordings round-trip through undo/redo', () => {
   const { narrations: _, ...old } = newProject();
-  for (const version of [1, 2, 3, 4, 5]) { const p = ProjectSchema.parse({ ...old, version }); assert.equal(p.version, 6); assert.deepEqual(p.narrations, []); }
+  for (const version of [1, 2, 3, 4, 5]) { const p = ProjectSchema.parse({ ...old, version }); assert.equal(p.version, 7); assert.deepEqual(p.narrations, []); }
   const original = newProject(), next = { ...original, narrations: [take()] };
   const history: History = { past: [], present: original, future: [] };
   assert.deepEqual(redo(undo(commit(history, ProjectSchema.parse(next)))).present.narrations, next.narrations);
