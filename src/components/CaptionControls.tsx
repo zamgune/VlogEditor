@@ -35,6 +35,8 @@ const PresetCard = memo(function PresetCard({ preset, disabled, favorite, librar
 });
 
 type Props = {
+  textRequest?: number;
+  styleRequest?: number;
   project: Project; caption: Caption; frame: number; disabled: boolean;
   libraryState: ReturnType<typeof useCaptionLibrary>;
   onStyle(patch: Partial<CaptionStyle>, common: boolean): void; onRange(a: number, b: number): void; onReset(): void; onAlignAll(): void;
@@ -42,11 +44,13 @@ type Props = {
   onText(text: string): void; onRuns(runs: TextRun[]): void; onDuplicate(): void; onDelete(): void; onOrder(direction: -1 | 1): void; onPreview(): void;
   onPrepareGroup(): void;
 };
-export function CaptionControls({ project, caption, frame, disabled, libraryState, onStyle, onRange, onReset, onAlignAll, onBegin, onEnd, onMargins, onText, onRuns, onDuplicate, onDelete, onOrder, onPreview, onPrepareGroup }: Props) {
+export function CaptionControls({ textRequest = 0, styleRequest = 0, project, caption, frame, disabled, libraryState, onStyle, onRange, onReset, onAlignAll, onBegin, onEnd, onMargins, onText, onRuns, onDuplicate, onDelete, onOrder, onPreview, onPrepareGroup }: Props) {
   const [common, setCommon] = useState(false), [tab, setTab] = useState<'text' | 'style' | 'decorate' | 'motion'>('style');
+  useEffect(() => { if (textRequest) setTab('text'); }, [textRequest]);
   const { library, loaded, saving } = libraryState;
   const [name, setName] = useState(''), [managed, setManaged] = useState<string>(), [rename, setRename] = useState('');
   const [filter, setFilter] = useState('all'), [category, setCategory] = useState('all'), [query, setQuery] = useState(''), [includeLayout, setIncludeLayout] = useState(false);
+  useEffect(() => { if (styleRequest) { setTab('style'); setFilter('saved'); setQuery(''); setCategory('all'); } }, [styleRequest]);
   const [notice, setNotice] = useState('');
   useEffect(() => { setCommon(false); }, [caption.id]);
   const cards = useMemo<Card[]>(() => [...CAPTION_PRESETS.map(p => ({ ...p, id: `builtin:${p.id}` })), ...library.styles.map(p => ({ ...p, id: `user:${p.id}`, savedId: p.id, category: '내 스타일' }))], [library.styles]);

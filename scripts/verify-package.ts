@@ -20,24 +20,33 @@ const errors: string[] = [];
 try {
   const page = await application.firstWindow();
   page.on('pageerror', error => errors.push(error.message));
-  await expect(page.locator('.milestone')).toContainText(`버전 ${version}`);
+  await expect(page.locator('footer')).toContainText(`장면 ${version}`);
+  await expect(page.getByRole('combobox', { name: '편집 레이아웃' })).toHaveValue('current');
+  await expect(page.getByRole('combobox', { name: '편집 레이아웃' }).getByRole('option', { name: '상하분할형', exact: true })).toHaveCount(1);
   const status = await page.evaluate(() => window.editor.status());
   expect(status.ffmpeg).toBe(true); expect(status.stage).toContain(version);
   expect(await application.evaluate(({ app }) => app.isPackaged)).toBe(true);
   await application.evaluate(({ dialog }, path) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] }); }, video);
-  await page.getByRole('button', { name: '＋ 영상 가져오기' }).click();
+  await page.getByRole('button', { name: '＋ 영상', exact: true }).click();
   await expect(page.getByTestId('timeline-clip')).toHaveCount(1, { timeout: 60000 });
   await expect(page.locator('.task-overlay')).toHaveCount(0);
   await page.getByRole('button', { name: '클립 1 시작 길이 조절' }).click();
+  await page.getByRole('button', { name: '상세 편집', exact: true }).click();
   for (const [name, value] of [['영상 시작 (초)', '0.5'], ['영상 종료 (초)', '2.5']]) {
     const input = page.getByRole('spinbutton', { name, exact: true }); await input.fill(value); await input.press('Enter');
   }
   await expect(page.getByRole('spinbutton', { name: '시작 프레임', exact: true })).toHaveValue('15');
   await expect(page.getByRole('spinbutton', { name: '종료 프레임', exact: true })).toHaveValue('75');
+  await page.getByRole('button', { name: '상세 편집 닫기' }).click();
   await page.getByRole('button', { name: '＋ 자막', exact: true }).click();
-  await page.locator('.caption-list textarea').first().fill('마루 부리 · 릴리스 확인');
-  await page.getByRole('tab', { name: '꾸미기', exact: true }).click();
-  await page.getByRole('combobox', { name: '자막 글꼴' }).selectOption('maruburi');
+  await page.getByRole('textbox', { name: '빠른 문구 편집' }).fill('마루 부리 · 릴리스 확인');
+  await page.getByRole('textbox', { name: '빠른 문구 편집' }).press('Tab');
+  await page.getByRole('combobox', { name: '빠른 기본 글꼴' }).selectOption('maruburi');
+  await page.getByRole('combobox', { name: '편집 레이아웃' }).selectOption('split');
+  await page.getByRole('button', { name: '좌우 바꾸기 ⇄' }).click();
+  await expect(page.locator('.app')).toHaveClass(/preview-right/);
+  await page.getByRole('combobox', { name: '미리보기 방식' }).selectOption('device');
+  await expect(page.getByTestId('safe-area-overlay')).toBeVisible();
   await expect(page.getByTestId('caption-object').locator('img')).toHaveAttribute('src', /^data:image\/png/, { timeout: 30000 });
   const ruler = (await page.locator('.ruler').boundingBox())!;
   await page.mouse.click(ruler.x + 1, ruler.y + 12);

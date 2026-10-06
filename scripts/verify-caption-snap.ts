@@ -85,7 +85,9 @@ try {
   expect((await state()).captions).toEqual(preserved);
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(w => w.webContents.getURL() === 'vlog://editor/index.html')!.setSize(1100, 760));
   await expect.poll(() => page.evaluate(() => window.innerWidth)).toBeLessThanOrEqual(1100);
+  await page.getByRole('button', { name: /출력 설정 ·/ }).click();
   await page.getByRole('combobox', { name: '프로젝트 화면 비율' }).selectOption('9:16');
+  await page.getByRole('button', { name: '상세 편집 닫기' }).click();
   await expect.poll(async () => (await state()).settings.width).toBe(1080);
   const smallA = await bounds(a), smallB = await bounds(b), smallScale = await scale();
   await dragTo(b, smallA.x + (smallA.width - smallB.width) / 2 + 1, smallA.y + smallA.height + 24 * smallScale + 1);

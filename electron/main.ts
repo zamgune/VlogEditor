@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, protocol, net, session } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, protocol, net, session, screen } from 'electron';
 import { access, mkdir, writeFile, readFile } from 'node:fs/promises';
 import { join, resolve, sep, extname } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -112,7 +112,8 @@ app.whenReady().then(async () => {
     && permission === 'media' && details.mediaType === 'audio');
   // This milestone has no network features: permit only the local app protocol.
   session.defaultSession.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*'] }, (_details, callback) => callback({ cancel: true }));
-  window = new BrowserWindow({ width: 1440, height: 960, minWidth: 1100, minHeight: 760, backgroundColor: '#101318',
+  const desktop = screen.getPrimaryDisplay().workAreaSize;
+  window = new BrowserWindow({ width: Math.min(1440, desktop.width), height: Math.min(960, desktop.height), minWidth: 780, minHeight: 480, backgroundColor: '#101318',
     title: '장면 · VlogTool', autoHideMenuBar: true, show: false,
     webPreferences: { preload: join(root, 'dist-electron', 'preload.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true, backgroundThrottling: false } });
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));

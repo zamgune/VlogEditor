@@ -1,6 +1,6 @@
 {
   "name": "vlogtool",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -44,6 +44,8 @@
     "test:trim-playback": "npm run build && tsx scripts/verify-trim-playback.ts",
     "test:trim-start-sync": "npm run build && tsx scripts/verify-trim-start-sync.ts",
     "test:export": "npm run build && tsx scripts/verify-export.ts",
+    "test:viewer": "npm run build && tsx scripts/verify-viewer.ts",
+    "test:workspace": "npm run build && tsx scripts/verify-workspace.ts",
     "benchmark:export": "tsx scripts/benchmark-export.ts"
   },
   "dependencies": {

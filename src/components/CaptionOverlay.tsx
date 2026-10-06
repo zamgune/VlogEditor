@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState, type PointerEvent } from 'react';
+import { useContext, useEffect, useRef, useState, type PointerEvent } from 'react';
+import { ViewerContext } from './PreviewCanvas';
+import { animatedRect, safeAreaWarnings } from '../shared/viewer';
 import { captionRect, activeCaptionSpans, captionTransform, effectiveStyle, type CaptionSpan, type CaptionBitmap, type CaptionStyle, type Caption } from '../shared/captions';
 import type { Project } from '../shared/project';
 import type { TextRun } from '../shared/rich-text';
@@ -10,6 +12,7 @@ type Props = { project: Project; frame: number; selected?: string; disabled: boo
 function CaptionObject({ caption, span, ...props }: Props & { caption: Caption; span: CaptionSpan }) {
   const { project, disabled, selected, onSelect, onStyle, onBegin, onEnd } = props;
   const style = effectiveStyle(project, caption), settings = project.settings;
+  const viewer = useContext(ViewerContext);
   const [bitmap, setBitmap] = useState<CaptionBitmap>();
   const [rasterSize, setRasterSize] = useState(style.size);
   const [dragging, setDragging] = useState(false), [snapResult, setSnapResult] = useState<CaptionSnapResult>();
@@ -33,10 +36,14 @@ function CaptionObject({ caption, span, ...props }: Props & { caption: Caption; 
     window.addEventListener('keydown', key, true); window.addEventListener('blur', blur);
     return () => { window.removeEventListener('keydown', key, true); window.removeEventListener('blur', blur); };
   }, []);
-  if (!bitmap || !caption.text.trim()) return null;
-  const visualBitmap = { width: Math.round(bitmap.width * style.size / rasterSize), height: Math.round(bitmap.height * style.size / rasterSize) };
+  const visualBitmap = { width: Math.round((bitmap?.width ?? 0) * style.size / rasterSize), height: Math.round((bitmap?.height ?? 0) * style.size / rasterSize) };
   const rect = captionRect(visualBitmap, style, settings, project.captionSettings.margins);
   const motion = captionTransform(style.motion, span.start, span.end, props.frame, Math.min(settings.width, settings.height));
+  const warning = bitmap && caption.text.trim() && motion.alpha > 0 && viewer ? safeAreaWarnings(animatedRect(rect, motion), viewer.geometry).join(' · ') : '';
+  const report = viewer?.warn;
+  useEffect(() => { report?.(caption.id, caption.text, warning); }, [report, caption.id, caption.text, warning]);
+  useEffect(() => () => report?.(caption.id, '', ''), [report, caption.id]);
+  if (!bitmap || !caption.text.trim()) return null;
   function start(e: PointerEvent, resize: boolean) {
     if (disabled || e.button !== 0) return;
     e.preventDefault(); e.stopPropagation();
@@ -72,7 +79,7 @@ function CaptionObject({ caption, span, ...props }: Props & { caption: Caption; 
   return <>
     {dragging && gesture.current && !gesture.current.resize && <CaptionSnapGuides result={snapResult} targets={gesture.current.targets} width={settings.width} height={settings.height} scale={gesture.current.scale} enabled={props.snap} />}
     <div ref={element} role="button" tabIndex={disabled ? -1 : 0} aria-label={`화면 자막 ${caption.text}`} data-testid="caption-object" data-caption-id={caption.id} className={`caption-object ${selected === caption.id ? 'selected' : ''} ${rect.overflow ? 'overflow' : ''}`} style={{ left: `${rect.left / settings.width * 100}%`, top: `${rect.top / settings.height * 100}%`, width: `${rect.width / settings.width * 100}%`, height: `${rect.height / settings.height * 100}%` }}
-      onPointerDown={e => start(e, false)} onPointerMove={move} onPointerUp={e => { if (gesture.current) { move(e); finish(); } }} onPointerCancel={() => finish(true)} onLostPointerCapture={() => finish(true)}
+      data-safe-warning={warning || undefined} title={warning || undefined} onPointerDown={e => start(e, false)} onPointerMove={move} onPointerUp={e => { if (gesture.current) { move(e); finish(); } }} onPointerCancel={() => finish(true)} onLostPointerCapture={() => finish(true)}
       onKeyDown={e => { if (disabled) return; const d = e.shiftKey ? 10 : 1; if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) { e.preventDefault(); e.stopPropagation(); onStyle(caption.id, { position: { ...style.position, x: (rect.left + rect.width * style.position.h + (e.key === 'ArrowLeft' ? -d : e.key === 'ArrowRight' ? d : 0)) / settings.width, y: (rect.top + rect.height * style.position.v + (e.key === 'ArrowUp' ? -d : e.key === 'ArrowDown' ? d : 0)) / settings.height } }); } else if (e.key === 'Enter') onSelect(caption.id); }}>
       <img src={bitmap.url} draggable={false} alt="" style={{ opacity: motion.alpha, transform: `translate(${motion.x / rect.width * 100}%, ${motion.y / rect.height * 100}%) scale(${motion.scale})` }} />
       {selected === caption.id && <button className="caption-resize" tabIndex={-1} aria-label="화면 자막 크기 조절" onPointerDown={e => start(e, true)} />}

@@ -35,11 +35,13 @@ async function amplitude(path: string, at: number, frequency: number) {
   return 2 * Math.hypot(real, imaginary) / count;
 }
 try {
-  await expect(page.getByRole('button', { name: '＋ 영상 가져오기' })).toBeEnabled();
+  await expect(page.getByRole('button', { name: '＋ 영상', exact: true })).toBeEnabled();
   const blocked = await page.evaluate(async () => { try { const s = await navigator.mediaDevices.getUserMedia({ audio: true }); s.getTracks().forEach(t => t.stop()); return false; } catch { return true; } }); expect(blocked).toBe(true);
+  await page.getByRole('button', { name: /출력 설정 ·/ }).click();
   await page.getByRole('combobox', { name: '프로젝트 화면 비율' }).selectOption('16:9');
+  await page.getByRole('button', { name: '상세 편집 닫기' }).click();
   await app.evaluate(({ dialog }, filePaths) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths }); }, fixture.sourceFiles.slice(0, 2));
-  await page.getByRole('button', { name: '＋ 영상 가져오기' }).click(); await expect(page.getByTestId('timeline-clip')).toHaveCount(2, { timeout: 60000 }); await expect(page.locator('.task-overlay')).toHaveCount(0);
+  await page.getByRole('button', { name: '＋ 영상', exact: true }).click(); await expect(page.getByTestId('timeline-clip')).toHaveCount(2, { timeout: 60000 }); await expect(page.locator('.task-overlay')).toHaveCount(0);
   await page.getByRole('button', { name: '음성 녹음', exact: true }).click();
   // Observe fake tracks only; no hardware microphone is accessed by this verification.
   await page.evaluate(() => { const original = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices); (window as any).originalGUM = original; navigator.mediaDevices.getUserMedia = async c => { const s = await original(c?.audio ? { ...c, audio: { ...(typeof c.audio === 'object' ? c.audio : {}), echoCancellation: false, noiseSuppression: false, autoGainControl: false } } : c); (window as any).testMic = s; return s; }; });

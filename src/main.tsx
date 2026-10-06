@@ -4,6 +4,8 @@ import { App } from './App';
 import './style.css';
 import './captions.css';
 import './narration.css';
+import './focus-editor.css';
+import './workspace-layout.css';
 import { renderCaption, renderCaptionScene } from './shared/caption-renderer';
 if (location.hash === '#caption-renderer') window.captionRenderer = { bitmap: renderCaption, scene: renderCaptionScene };
 else createRoot(document.getElementById('root')!).render(<React.StrictMode><App /></React.StrictMode>);

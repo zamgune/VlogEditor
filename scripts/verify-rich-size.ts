@@ -25,8 +25,8 @@ async function bitmap() {
 }
 try {
   await page.getByRole('button', { name: '작업 복구' }).click(); await expect(page.getByTestId('timeline-clip')).toHaveCount(1, { timeout: 60000 }); await expect(page.locator('.task-overlay')).toHaveCount(0);
-  await page.getByRole('button', { name: '＋ 전체 제목', exact: true }).click(); await expect(page.getByTestId('caption-object')).toHaveCount(1);
-  await page.getByRole('tab', { name: '문구', exact: true }).click();
+  await page.getByRole('button', { name: '＋ 제목', exact: true }).click(); await expect(page.getByTestId('caption-object')).toHaveCount(1);
+  await page.getByRole('button', { name: '부분 서식', exact: true }).click();
   const editor = page.getByRole('textbox', { name: '부분 서식 문구' }); await editor.fill('오늘은 손글씨와 큰 글자');
   await editor.press('Control+Home'); for (let i = 0; i < 4; i++) await editor.press('ArrowRight');
   await page.keyboard.down('Shift'); for (let i = 0; i < 4; i++) await editor.press('ArrowRight'); await page.keyboard.up('Shift');
