@@ -1,0 +1,67 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { addMedia, newProject, ProjectSchema, trim, commit, undo, redo, type Media } from '../src/shared/project';
+import { addCaption, captureCaptionGroup, applyCaptionGroup, CaptionLibrarySchema, emptyCaptionLibrary, effectiveStyle, captionSpans } from '../src/shared/captions';
+import { addDecoration, decorationSpans } from '../src/shared/decoration';
+import { formatTextRange } from '../src/shared/rich-text';
+const media: Media = { id: crypto.randomUUID(), path: 'C:/bundle.mp4', name: 'bundle', fingerprint: 'bundle', durationFrames: 150, width: 1920, height: 1080, codec: 'h264', sourceFps: 30, timeBase: '1/30', startTime: 0, rotation: 0, hasAudio: false, warnings: [] };
+const fixture = () => addMedia(newProject('16:9'), [media]);
+function design() {
+  let p = fixture(); p = trim(p, p.clips[0].id, 30, 120);
+  for (const kind of ['title', 'title'] as const) p = addCaption(p, p.clips[0].id, kind, 30).project;
+  p.captions[0].text = '함께 떠나는 여행'; p.captions[0].overrides.size = 60;
+  p.captions[0].runs = formatTextRange(p.captions[0].text, [], 3, 6, { font: 'nanumpen', size: 90 });
+  p.captions[0].overrides.gradient = { angle: 125, from: '#ffddea', to: '#ccddff' };
+  p.captions[1].text = '에피소드 2'; p.captions[1].overrides.size = 30;
+  p = addDecoration(p, p.clips[0].id, 'rectangle', 45).project;
+  p = addDecoration(p, p.clips[0].id, 'ellipse', 30).project;
+  p = addDecoration(p, p.clips[0].id, 'rectangle', 30).project;
+  p.decorations[0].radius = 42; p.decorations[0].color = '#aaccdd'; p.decorations[0].stroke = 3;
+  Object.assign(p.decorations[1], { layer: 'front', clipId: null, inFrame: 0, outFrame: 0, opacity: .4 });
+  return p;
+}
+test('caption bundles capture only chosen decorations and reproduce layout, runs, gradient, layers and intervals', () => {
+  const p = design(), group = captureCaptionGroup(p, p.captions.map(c => c.id), '내 기본 자막', p.decorations.slice(0, 2).map(s => s.id));
+  assert.equal(group.decorations.length, 2); assert.equal(group.decorations[0].startFrame, 15); assert.equal(group.decorations[0].endFrame, 90);
+  const target = fixture(); target.clips[0].inFrame = 60; target.captionSettings.margins.top = .2;
+  const result = applyCaptionGroup(target, group, target.clips[0].id); ProjectSchema.parse(result.project);
+  assert.deepEqual(result.project.captions.map(c => c.runs), p.captions.map(c => c.runs));
+  assert.deepEqual(effectiveStyle(result.project, result.project.captions[0]).gradient, p.captions[0].overrides.gradient);
+  assert.deepEqual(decorationSpans(result.project).map(s => [s.start, s.end]), [[15, 90], [0, 90]]);
+  assert.deepEqual(result.project.decorations.map(s => [s.x, s.y, s.width, s.height, s.color, s.opacity, s.radius, s.stroke, s.layer]), p.decorations.slice(0, 2).map(s => [s.x, s.y, s.width, s.height, s.color, s.opacity, s.radius, s.stroke, s.layer]));
+  assert.notEqual(result.shapeIds[0], p.decorations[0].id);
+  result.project.decorations[0].color = '#000000'; result.project.captions[0].runs[0].style.size = 20;
+  assert.equal(group.decorations[0].color, '#aaccdd'); assert.equal(group.items[0].runs[0].style.size, 90);
+});
+test('default bundles add every component at the playhead as normal subtitles in one undo step', () => {
+  const source = design(), group = captureCaptionGroup(source, source.captions.map(c => c.id), '기본', source.decorations.slice(0, 2).map(s => s.id));
+  const target = fixture(); target.clips[0].inFrame = 30; target.clips[0].outFrame = 120;
+  const result = applyCaptionGroup(target, group, target.clips[0].id, 75);
+  ProjectSchema.parse(result.project);
+  assert.deepEqual(result.project.captions.map(c => c.kind), ['normal', 'normal']);
+  assert.deepEqual(captionSpans(result.project).map(s => [s.start, s.end]), [[45, 90], [45, 90]]);
+  assert.deepEqual(decorationSpans(result.project).map(s => [s.start, s.end]), [[45, 90], [45, 90]]);
+  const history = commit({ past: [], present: target, future: [] }, result.project);
+  assert.deepEqual(undo(history).present, target); assert.deepEqual(redo(undo(history)).present, result.project);
+  const short = trim(target, target.clips[0].id, 30, 31), shortResult = applyCaptionGroup(short, group, short.clips[0].id, 999).project;
+  ProjectSchema.parse(shortResult); assert.ok([...shortResult.captions, ...shortResult.decorations].every(x => x.inFrame === 30 && x.outFrame === 31));
+  assert.throws(() => applyCaptionGroup(target, group, undefined, 60));
+  assert.throws(() => applyCaptionGroup(target, group, target.clips[0].id, NaN));
+  assert.throws(() => applyCaptionGroup({ ...target, decorations: Array(500).fill(source.decorations[0]) }, group, target.clips[0].id, 60));
+  assert.throws(() => applyCaptionGroup({ ...target, captions: Array(1999).fill(source.captions[0]) }, group, target.clips[0].id, 60));
+  assert.equal(target.decorations.length, 0); assert.equal(target.captions.length, 0);
+});
+test('legacy libraries migrate to bundles without losing presets and validate persistent defaults', () => {
+  const source = design(), group = captureCaptionGroup(source, [source.captions[0].id], '기본', [source.decorations[0].id]);
+  const { decorations: _, ...legacyGroup } = group;
+  const style = { id: crypto.randomUUID(), name: '기존 스타일', style: effectiveStyle(source, source.captions[0]) };
+  const old = { version: 3, styles: [style], favorites: [`user:${style.id}`], groups: [legacyGroup] };
+  const migrated = CaptionLibrarySchema.parse(old); assert.equal(migrated.version, 4); assert.equal(migrated.defaultGroupId, null);
+  assert.deepEqual(migrated.styles, old.styles); assert.deepEqual(migrated.favorites, old.favorites); assert.deepEqual(migrated.groups[0].decorations, []);
+  const library = { ...emptyCaptionLibrary(), groups: [group], defaultGroupId: group.id };
+  assert.deepEqual(CaptionLibrarySchema.parse(JSON.parse(JSON.stringify(library))), library);
+  assert.throws(() => CaptionLibrarySchema.parse({ ...library, defaultGroupId: crypto.randomUUID() }));
+  assert.throws(() => CaptionLibrarySchema.parse({ ...library, groups: [] }));
+  assert.throws(() => CaptionLibrarySchema.parse({ ...library, groups: [{ ...group, decorations: Array(51).fill(group.decorations[0]) }] }));
+  assert.throws(() => CaptionLibrarySchema.parse({ ...library, groups: [{ ...group, decorations: [{ ...group.decorations[0], endFrame: 0 }] }] }));
+});

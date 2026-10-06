@@ -26,11 +26,16 @@ export async function run(executable: string, args: string[], options: { signal?
     });
   });
 }
-export function progressReader(totalFrames: number, callback: (percent: number) => void) {
-  let pending = '';
+export function progressReader(totalFrames: number, callback: (percent: number, frames: number) => void) {
+  let pending = '', lastFrame = 0;
   return (chunk: string) => {
     pending += chunk;
     const lines = pending.split(/\r?\n/); pending = lines.pop() ?? '';
-    for (const line of lines) if (line.startsWith('frame=')) callback(Math.min(99, Math.max(0, Number(line.slice(6)) / totalFrames * 100)));
+    for (const line of lines) if (line.startsWith('frame=')) {
+      const frame = Number(line.slice(6).trim());
+      if (!Number.isFinite(frame) || frame < lastFrame || totalFrames <= 0) continue;
+      lastFrame = Math.min(totalFrames, Math.max(0, frame));
+      callback(Math.min(99, lastFrame / totalFrames * 100), lastFrame);
+    }
   };
 }

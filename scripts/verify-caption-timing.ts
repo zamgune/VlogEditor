@@ -93,7 +93,7 @@ try {
   await startInput.fill(''); await startInput.blur(); await expect(startInput).toHaveValue('0');
   // Saved groups preserve the two time slots rather than resetting them to the clip start.
   await page.getByRole('button', { name: '모두 선택', exact: true }).click(); await page.getByRole('textbox', { name: '새 글 그룹 이름' }).fill('1.5초씩 두 자막');
-  await page.getByRole('button', { name: '선택한 글을 새 그룹으로 저장' }).click();
+  await page.getByRole('button', { name: '선택한 글·꾸미기 저장' }).click();
   await expect.poll(async () => (await page.evaluate(() => window.editor.captionPresets())).groups.length).toBe(1);
   const group = (await page.evaluate(() => window.editor.captionPresets())).groups[0];
   expect(group.items.map(i => [i.startFrame, i.endFrame])).toEqual([[0, 45], [45, 90], [0, 45], [45, 90]]);

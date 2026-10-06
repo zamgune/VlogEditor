@@ -66,7 +66,7 @@ try {
   await page.getByRole('button', { name: '자막 복제', exact: true }).click(); await expect(page.getByTestId('caption-object')).toHaveCount(3);
   await page.getByRole('button', { name: '실행 취소', exact: true }).click(); await expect(page.getByTestId('caption-object')).toHaveCount(2);
   await page.getByRole('button', { name: '모두 선택', exact: true }).click(); await page.getByRole('textbox', { name: '새 글 그룹 이름' }).fill('에피소드 시작');
-  await page.getByRole('button', { name: '선택한 글을 새 그룹으로 저장' }).click();
+  await page.getByRole('button', { name: '선택한 글·꾸미기 저장' }).click();
   await expect.poll(async () => (await library()).groups.length).toBe(1);
   const saved = (await library()).groups[0]; expect(saved.items.map(i => i.style.size)).toEqual([60, 30]); expect(saved.items[1].style.opacity).toBe(.25);
   expect((await library()).styles).toHaveLength(1); expect((await library()).favorites).toEqual([`user:${legacyStyle.id}`]);
@@ -83,15 +83,15 @@ try {
   expect(effectiveStyle(project, project.captions[1]).size).toBe(30); expect(effectiveStyle(project, project.captions[1]).opacity).toBe(.25);
   await select(importedFirst); await page.locator(`textarea[aria-label="자막 문장 ${importedFirst}"]`).fill('수정한 시작 문구');
   await page.getByRole('tab', { name: '꾸미기', exact: true }).click(); await typeNumber('자막 글자 크기', '72');
-  await page.getByRole('button', { name: '선택한 글로 그룹 덮어쓰기' }).click();
+  await page.getByRole('button', { name: '선택한 글·꾸미기로 덮어쓰기' }).click();
   await expect.poll(async () => (await library()).groups[0].items[0].text).toBe('수정한 시작 문구'); expect((await library()).groups[0].items[0].style.size).toBe(72);
   await page.getByRole('textbox', { name: '글 그룹 새 이름' }).fill('수정한 인트로'); await page.getByRole('button', { name: '그룹 이름 변경' }).click();
   await expect.poll(async () => (await library()).groups[0].name).toBe('수정한 인트로');
-  await page.getByRole('textbox', { name: '새 글 그룹 이름' }).fill('복사본'); await page.getByRole('button', { name: '선택한 글을 새 그룹으로 저장' }).click();
+  await page.getByRole('textbox', { name: '새 글 그룹 이름' }).fill('복사본'); await page.getByRole('button', { name: '선택한 글·꾸미기 저장' }).click();
   await expect.poll(async () => (await library()).groups.length).toBe(2); await page.getByRole('button', { name: '그룹 삭제', exact: true }).click();
   await expect.poll(async () => (await library()).groups.length).toBe(1); await expect(page.getByTestId('caption-object')).toHaveCount(2);
   await page.getByRole('combobox', { name: '저장한 글 그룹' }).selectOption(saved.id);
-  project = await state(); expect(project.version).toBe(7);
+  project = await state(); expect(project.version).toBe(8);
   const projectPath = join(out, '새 프로젝트.vlog.json');
   await app.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, projectPath);
   await page.getByRole('button', { name: '저장 Ctrl S' }).click(); await expect.poll(async () => { try { return (await stat(projectPath)).size; } catch { return 0; } }).toBeGreaterThan(100);

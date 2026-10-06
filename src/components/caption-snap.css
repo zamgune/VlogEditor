@@ -1,0 +1,7 @@
+.caption-guides.caption-smart-guides{z-index:12}
+.caption-snap-lines{position:absolute;inset:0;width:100%;height:100%;overflow:visible;fill:none;stroke:#92f8c4;stroke-width:1}
+.caption-snap-lines line,.caption-snap-lines rect{vector-effect:non-scaling-stroke}
+.caption-snap-target{stroke-dasharray:4 3;stroke-opacity:.8}
+.caption-snap-gap-label{transform:translate(-50%,7px);font-size:10px;line-height:1.3;color:#d6ffe9;background:#16372dee;padding:2px 4px;border-radius:3px;white-space:nowrap}
+.caption-snap-gap-label.vertical{transform:translate(8px,-50%)}
+.caption-smart-guides.compact>span,.caption-smart-guides.tiny .caption-snap-gap-label{display:none}

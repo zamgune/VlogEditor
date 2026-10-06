@@ -10,7 +10,7 @@ export function CaptionLane({ project, kind, zoom, selected, disabled, onSelect,
   function end(cancelled = false) { const d = drag.current; if (!d) return; drag.current = null; if (d.node.hasPointerCapture(d.pointerId)) d.node.releasePointerCapture(d.pointerId); latest.current.onEnd(cancelled || d.atOrigin); }
   useEffect(() => { const fn = (e: KeyboardEvent) => { if (e.key === 'Escape' && drag.current) { e.preventDefault(); e.stopImmediatePropagation(); end(true); } }; const blur = () => end(true); window.addEventListener('keydown', fn, true); window.addEventListener('blur', blur); return () => { window.removeEventListener('keydown', fn, true); window.removeEventListener('blur', blur); }; }, []);
   function start(e: PointerEvent<HTMLDivElement>, caption: Caption) {
-    if (disabled || e.button !== 0 || drag.current) return; e.preventDefault(); e.stopPropagation(); onSelect(caption.id); if (caption.kind === 'title') return; onBegin();
+    if (disabled || e.button !== 0 || drag.current) return; e.preventDefault(); e.stopPropagation(); e.currentTarget.focus(); onSelect(caption.id); if (caption.kind === 'title') return; onBegin();
     const edge = (e.target as HTMLElement).dataset.edge as 'start' | 'end' | undefined;
     const clip = project.clips.find(c => c.id === caption.clipId)!;
     // A video trim can hide part of the stored caption. Drag the visible interval.

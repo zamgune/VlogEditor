@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { ColorSchema, NEUTRAL_COLOR } from './color';
 import { CanvasSettingsSchema, FramingSchema, DEFAULT_FRAMING, canvasSettings, type CanvasPresetId } from './canvas';
 import { CaptionSchema, CaptionSettingsSchema, defaultCaptionSettings } from './captions';
+import { DecorationSchema } from './decoration';
 import { NarrationSchema } from './narration';
 
 export const FPS = 30;
@@ -18,11 +19,12 @@ export const MediaSchema = z.object({
 }).strict();
 export const ClipSchema = z.object({ id, mediaId: id, inFrame: frame, outFrame: frame, volume: z.number().min(0).max(1), color: ColorSchema.default(() => ({ ...NEUTRAL_COLOR })), framing: FramingSchema.default(() => ({ ...DEFAULT_FRAMING })) }).strict();
 export const ProjectSchema = z.object({
-  format: z.literal('vlogtool'), version: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5), z.literal(6), z.literal(7)]), id,
+  format: z.literal('vlogtool'), version: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5), z.literal(6), z.literal(7), z.literal(8)]), id,
   name: z.string().min(1).max(200),
   settings: CanvasSettingsSchema,
   media: z.array(MediaSchema).max(200), clips: z.array(ClipSchema).max(200),
   captions: z.array(CaptionSchema).max(2000).default([]), captionSettings: CaptionSettingsSchema.default(defaultCaptionSettings),
+  decorations: z.array(DecorationSchema).max(500).default([]),
   narrations: z.array(NarrationSchema).max(100).default([])
 }).strict().superRefine((p, ctx) => {
   if (new Set(p.media.map(m => m.id)).size !== p.media.length || new Set(p.clips.map(c => c.id)).size !== p.clips.length)
@@ -31,6 +33,12 @@ export const ProjectSchema = z.object({
     const m = p.media.find(m => m.id === c.mediaId);
     if (!m || c.outFrame <= c.inFrame || c.outFrame > m.durationFrames)
       ctx.addIssue({ code: 'custom', message: '클립 구간 또는 미디어 참조가 올바르지 않습니다.' });
+  }
+  const shapeIds = new Set<string>();
+  for (const shape of p.decorations) {
+    const clip = p.clips.find(c => c.id === shape.clipId), media = p.media.find(m => m.id === clip?.mediaId);
+    if (shapeIds.has(shape.id) || (shape.clipId === null ? shape.inFrame !== 0 || shape.outFrame !== 0 : !clip || !media || shape.outFrame <= shape.inFrame || shape.outFrame > media.durationFrames)) ctx.addIssue({ code: 'custom', message: '도형 구간 또는 연결된 영상이 올바르지 않습니다.' });
+    shapeIds.add(shape.id);
   }
   const ids = new Set<string>();
   if (new Set(p.narrations.map(n => n.id)).size !== p.narrations.length) ctx.addIssue({ code: 'custom', message: '중복된 녹음 ID입니다.' });
@@ -45,17 +53,17 @@ export const ProjectSchema = z.object({
     ids.add(c.id);
   }
 }).transform(p => {
-  if (p.version >= 5) return { ...p, version: 7 as const };
+  if (p.version >= 5) return { ...p, version: 8 as const };
   const rank = { normal: 0, title: 1, emphasis: 2 };
   const order = new Map([...p.captions].sort((a, b) => rank[a.kind] - rank[b.kind]).map((c, i) => [c.id, i]));
-  return { ...p, version: 7 as const, captions: p.captions.map(c => ({ ...c, zOrder: order.get(c.id)! })) };
+  return { ...p, version: 8 as const, captions: p.captions.map(c => ({ ...c, zOrder: order.get(c.id)! })) };
 });
 export type Media = z.infer<typeof MediaSchema>;
 export type Clip = z.infer<typeof ClipSchema>;
 export type Project = z.infer<typeof ProjectSchema>;
 export function newProject(preset: CanvasPresetId = '9:16'): Project {
-  return { format: 'vlogtool', version: 7, id: crypto.randomUUID(), name: '나의 첫 브이로그',
-    settings: canvasSettings(preset), media: [], clips: [], captions: [], captionSettings: defaultCaptionSettings(), narrations: [] };
+  return { format: 'vlogtool', version: 8, id: crypto.randomUUID(), name: '나의 첫 브이로그',
+    settings: canvasSettings(preset), media: [], clips: [], captions: [], decorations: [], captionSettings: defaultCaptionSettings(), narrations: [] };
 }
 export const duration = (p: Project) => p.clips.reduce((sum, c) => sum + c.outFrame - c.inFrame, 0);
 export function locate(p: Project, timelineFrame: number) {
@@ -80,7 +88,11 @@ export function split(p: Project, clipId: string, timelineFrame: number): Projec
     return [c.inFrame < at.sourceFrame ? { ...c, outFrame: Math.min(c.outFrame, at.sourceFrame) } : null,
       c.outFrame > at.sourceFrame ? { ...c, id: crypto.randomUUID(), clipId: rightId, inFrame: Math.max(c.inFrame, at.sourceFrame) } : null].filter(c => c !== null);
   });
-  return { ...p, clips, captions };
+  const decorations = p.decorations.flatMap(s => s.clipId !== clipId ? [s] : [
+    s.inFrame < at.sourceFrame ? { ...s, outFrame: Math.min(s.outFrame, at.sourceFrame) } : null,
+    s.outFrame > at.sourceFrame ? { ...s, id: crypto.randomUUID(), clipId: rightId, inFrame: Math.max(s.inFrame, at.sourceFrame) } : null
+  ].filter(s => s !== null));
+  return { ...p, clips, captions, decorations };
 }
 export function trim(p: Project, clipId: string, inFrame: number, outFrame: number): Project {
   const existing = p.clips.find(c => c.id === clipId);
@@ -88,7 +100,7 @@ export function trim(p: Project, clipId: string, inFrame: number, outFrame: numb
   const next = { ...p, clips: p.clips.map(c => c.id === clipId ? { ...c, inFrame, outFrame } : c) };
   return ProjectSchema.parse(next);
 }
-export const removeClip = (p: Project, clipId: string): Project => ({ ...p, clips: p.clips.filter(c => c.id !== clipId), captions: p.captions.filter(c => c.clipId !== clipId) });
+export const removeClip = (p: Project, clipId: string): Project => ({ ...p, clips: p.clips.filter(c => c.id !== clipId), captions: p.captions.filter(c => c.clipId !== clipId), decorations: p.decorations.filter(s => s.clipId !== clipId) });
 export function moveClip(p: Project, from: number, to: number): Project {
   if (from < 0 || to < 0 || from >= p.clips.length || to >= p.clips.length || from === to) return p;
   const clips = p.clips.slice(); const [c] = clips.splice(from, 1); clips.splice(to, 0, c); return { ...p, clips };

@@ -32,7 +32,7 @@ export function TrimControls({ clip, media, sourceFrame, disabled, onChange }: {
       <button disabled={disabled || !atClip || sourceFrame === clip.inFrame} title="현재 장면 앞부분을 잘라냅니다" onClick={() => { if (atClip) onChange(sourceFrame, clip.outFrame, 'start'); }}>여기부터 시작</button>
       <button disabled={disabled || !atClip || sourceFrame === clip.outFrame - 1} title="현재 장면까지 남기고 뒷부분을 잘라냅니다" onClick={() => { if (atClip) onChange(clip.inFrame, sourceFrame + 1, 'end'); }}>여기까지 사용</button>
     </div>
-    <p className="trim-instruction">시간은 원본 기준입니다. 위쪽 눈금으로 장면을<br />찾고 버튼을 눌러도 됩니다. 왼쪽 손잡이는 앞,<br />오른쪽은 뒤를 자르며 뒤 장면은 이어집니다.</p>
+    <p className="trim-instruction">남길 시작 장면을 찾은 뒤 <b>Q</b>를 누르면 앞부분을 바로 자릅니다. <b>W</b>는 현재 프레임까지 남깁니다. 손잡이를 끌면 잘라낼 부분을 확인할 수 있고, 놓으면 뒤 영상이 이어집니다. 시간은 원본 기준입니다.</p>
     <label className="duration-control">길이 (초)<input aria-label="영상 길이 (초)" key={`${clip.id}-length-${frames}`} type="number" min={1 / FPS} max={maximum / FPS} step="any" defaultValue={(frames / FPS).toFixed(3)} disabled={disabled}
       onBlur={e => secondsInput(e.currentTarget, 'duration')}
       onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }} /></label>

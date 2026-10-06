@@ -27,7 +27,8 @@ await writeFile(join(app, 'package.json'), JSON.stringify({
 // FFmpeg is obtained from its distributor on first launch, with the pinned SHA256.
 await cp(join(root, 'scripts/setup-ffmpeg.ps1'), join(app, 'scripts/setup-ffmpeg.ps1'));
 await cp(join(root, 'README.md'), join(destination, 'README.md'));
-await cp(join(root, 'LICENSE'), join(destination, 'LICENSE-VlogTool.txt'));
+await cp(join(root, 'LICENSE'), join(destination, 'LICENSE'));
+await cp(join(root, 'docs'), join(destination, 'docs'), { recursive: true });
 await mkdir(join(destination, 'licenses'), { recursive: true });
 await cp(join(root, 'docs/THIRD_PARTY.md'), join(destination, 'licenses/THIRD_PARTY.md'));
 for (const dependency of ['react', 'react-dom', 'scheduler', 'zod']) {

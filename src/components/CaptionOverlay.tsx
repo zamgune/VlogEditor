@@ -1,26 +1,29 @@
 import { useEffect, useRef, useState, type PointerEvent } from 'react';
 import { captionRect, activeCaptionSpans, captionTransform, effectiveStyle, type CaptionSpan, type CaptionBitmap, type CaptionStyle, type Caption } from '../shared/captions';
 import type { Project } from '../shared/project';
+import type { TextRun } from '../shared/rich-text';
+import { snapCaptionRect, type CaptionSnapTarget, type CaptionSnapAnchor, type CaptionSnapResult } from '../shared/caption-snap';
+import { CaptionSnapGuides } from './CaptionSnapGuides';
 
 type Props = { project: Project; frame: number; selected?: string; disabled: boolean; snap: boolean;
-  onSelect(id: string): void; onStyle(id: string, patch: Partial<CaptionStyle>): void; onBegin(): void; onEnd(cancelled?: boolean): void; onError(message: string): void };
+  onSelect(id: string): void; onStyle(id: string, patch: Partial<CaptionStyle>): void; onResize(id: string, size: number, runs: TextRun[]): void; onBegin(): void; onEnd(cancelled?: boolean): void; onError(message: string): void };
 function CaptionObject({ caption, span, ...props }: Props & { caption: Caption; span: CaptionSpan }) {
   const { project, disabled, selected, onSelect, onStyle, onBegin, onEnd } = props;
   const style = effectiveStyle(project, caption), settings = project.settings;
   const [bitmap, setBitmap] = useState<CaptionBitmap>();
   const [rasterSize, setRasterSize] = useState(style.size);
-  const [dragging, setDragging] = useState(false), [snapped, setSnapped] = useState(false);
+  const [dragging, setDragging] = useState(false), [snapResult, setSnapResult] = useState<CaptionSnapResult>();
   const element = useRef<HTMLDivElement>(null);
-  const gesture = useRef<{ pointerId: number; x: number; y: number; left: number; top: number; width: number; height: number; scale: number; size: number; style: CaptionStyle; resize: boolean; changed: boolean } | null>(null);
+  const gesture = useRef<{ pointerId: number; x: number; y: number; left: number; top: number; width: number; height: number; scale: number; size: number; style: CaptionStyle; runs: TextRun[]; resize: boolean; changed: boolean; targets: CaptionSnapTarget[]; anchors: CaptionSnapAnchor[] } | null>(null);
   const latest = useRef(props); latest.current = props;
-  const renderKey = JSON.stringify({ text: caption.text, style: { ...style, position: undefined, motion: undefined }, width: settings.width, height: settings.height });
+  const renderKey = JSON.stringify({ text: caption.text, runs: caption.runs, style: { ...style, position: undefined, motion: undefined }, width: settings.width, height: settings.height });
   useEffect(() => {
     let live = true;
-    const timer = setTimeout(() => { void window.editor.captionBitmap({ text: caption.text, style, width: settings.width, height: settings.height }).then(b => { if (live) { setBitmap(b); setRasterSize(style.size); } }).catch(e => { if (live) props.onError(`자막 표시 실패: ${String(e)}`); }); }, 60);
+    const timer = setTimeout(() => { void window.editor.captionBitmap({ text: caption.text, runs: caption.runs, style, width: settings.width, height: settings.height }).then(b => { if (live) { setBitmap(b); setRasterSize(style.size); } }).catch(e => { if (live) props.onError(`자막 표시 실패: ${String(e)}`); }); }, 60);
     return () => { live = false; clearTimeout(timer); };
   }, [renderKey]);
   function finish(cancelled = false) {
-    const g = gesture.current; if (!g) return; gesture.current = null; setDragging(false); setSnapped(false);
+    const g = gesture.current; if (!g) return; gesture.current = null; setDragging(false); setSnapResult(undefined);
     if (element.current?.hasPointerCapture(g.pointerId)) element.current.releasePointerCapture(g.pointerId);
     latest.current.onEnd(cancelled);
   }
@@ -38,8 +41,14 @@ function CaptionObject({ caption, span, ...props }: Props & { caption: Caption; 
     if (disabled || e.button !== 0) return;
     e.preventDefault(); e.stopPropagation();
     const node = element.current!, canvas = node.parentElement!.getBoundingClientRect();
+    const scale = canvas.width / settings.width;
+    const targets = Array.from(node.parentElement!.querySelectorAll<HTMLElement>('.caption-object[data-caption-id]')).filter(other => other !== node).map(other => {
+      const box = other.getBoundingClientRect();
+      return { id: other.dataset.captionId!, left: (box.left - canvas.left) / scale, top: (box.top - canvas.top) / scale, width: box.width / scale, height: box.height / scale };
+    }).filter(target => target.left < settings.width && target.top < settings.height && target.left + target.width > 0 && target.top + target.height > 0);
+    const anchors = ([0, .5, 1] as const).map(anchor => ({ anchor, ...captionRect(visualBitmap, { ...style, position: { h: anchor, v: anchor, x: null, y: null } }, settings, project.captionSettings.margins) }));
     node.focus(); onSelect(caption.id); onBegin();
-    gesture.current = { pointerId: e.pointerId, x: e.clientX, y: e.clientY, left: rect.left, top: rect.top, width: rect.width, height: rect.height, scale: canvas.width / settings.width, size: style.size, style, resize, changed: false };
+    gesture.current = { pointerId: e.pointerId, x: e.clientX, y: e.clientY, left: rect.left, top: rect.top, width: rect.width, height: rect.height, scale, size: style.size, style, runs: caption.runs, resize, changed: false, targets, anchors };
     node.setPointerCapture(e.pointerId); setDragging(true);
   }
   function move(e: PointerEvent) {
@@ -47,19 +56,21 @@ function CaptionObject({ caption, span, ...props }: Props & { caption: Caption; 
     if (!g.changed && Math.hypot(e.clientX - g.x, e.clientY - g.y) < 3) return;
     g.changed = true;
     const dx = (e.clientX - g.x) / g.scale, dy = (e.clientY - g.y) / g.scale;
-    if (g.resize) { const ratio = Math.max(.1, (g.width + dx) / g.width); onStyle(caption.id, { size: Math.max(16, Math.min(200, Math.round(g.size * ratio))) }); return; }
-    const left = g.left + dx, top = g.top + dy;
-    let position: CaptionStyle['position'] = { ...g.style.position, x: Math.max(-2, Math.min(3, (left + g.width * g.style.position.h) / settings.width)), y: Math.max(-2, Math.min(3, (top + g.height * g.style.position.v) / settings.height)) };
-    let nearest = 14, found = false;
-    if (props.snap && !e.altKey) for (const h of [0, .5, 1] as const) for (const v of [0, .5, 1] as const) {
-      const candidate = { h, v, x: null, y: null }; const r = captionRect(bitmap!, { ...style, position: candidate }, settings, project.captionSettings.margins);
-      const distance = Math.hypot(r.left - left, r.top - top) * g.scale;
-      if (distance < nearest) { nearest = distance; position = candidate; found = true; }
+    if (g.resize) {
+      const ratio = Math.max(.1, (g.width + dx) / g.width), size = Math.max(16, Math.min(200, Math.round(g.size * ratio)));
+      const runs = g.runs.map(r => r.style.size === undefined ? r : { ...r, style: { ...r.style, size: Math.max(16, Math.min(200, r.style.size * size / g.size)) } });
+      props.onResize(caption.id, size, runs); return;
     }
-    setSnapped(found); onStyle(caption.id, { position });
+    const raw = { left: g.left + dx, top: g.top + dy, width: g.width, height: g.height };
+    const result = props.snap && !e.altKey ? snapCaptionRect(raw, g.targets, g.anchors, settings, g.scale) : undefined;
+    const { left, top } = result?.rect ?? raw, h = result?.h ?? g.style.position.h, v = result?.v ?? g.style.position.v;
+    const position: CaptionStyle['position'] = { h, v,
+      x: result?.h !== undefined ? null : Math.max(-2, Math.min(3, (left + g.width * h) / settings.width)),
+      y: result?.v !== undefined ? null : Math.max(-2, Math.min(3, (top + g.height * v) / settings.height)) };
+    setSnapResult(result); onStyle(caption.id, { position });
   }
   return <>
-    {dragging && <div className={`caption-guides ${snapped ? 'snapped' : ''}`} aria-hidden="true">{[1, 2].map(i => <div key={`v${i}`} style={{ left: `${i * 100 / 3}%`, top: 0, bottom: 0, borderLeft: '1px dashed #a4dfc088' }} />)}{[1, 2].map(i => <div key={`h${i}`} style={{ top: `${i * 100 / 3}%`, left: 0, right: 0, borderTop: '1px dashed #a4dfc088' }} />)}<span>{snapped ? '정렬됨' : 'Alt · 자석 잠시 해제'}</span></div>}
+    {dragging && gesture.current && !gesture.current.resize && <CaptionSnapGuides result={snapResult} targets={gesture.current.targets} width={settings.width} height={settings.height} scale={gesture.current.scale} enabled={props.snap} />}
     <div ref={element} role="button" tabIndex={disabled ? -1 : 0} aria-label={`화면 자막 ${caption.text}`} data-testid="caption-object" data-caption-id={caption.id} className={`caption-object ${selected === caption.id ? 'selected' : ''} ${rect.overflow ? 'overflow' : ''}`} style={{ left: `${rect.left / settings.width * 100}%`, top: `${rect.top / settings.height * 100}%`, width: `${rect.width / settings.width * 100}%`, height: `${rect.height / settings.height * 100}%` }}
       onPointerDown={e => start(e, false)} onPointerMove={move} onPointerUp={e => { if (gesture.current) { move(e); finish(); } }} onPointerCancel={() => finish(true)} onLostPointerCapture={() => finish(true)}
       onKeyDown={e => { if (disabled) return; const d = e.shiftKey ? 10 : 1; if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) { e.preventDefault(); e.stopPropagation(); onStyle(caption.id, { position: { ...style.position, x: (rect.left + rect.width * style.position.h + (e.key === 'ArrowLeft' ? -d : e.key === 'ArrowRight' ? d : 0)) / settings.width, y: (rect.top + rect.height * style.position.v + (e.key === 'ArrowUp' ? -d : e.key === 'ArrowDown' ? d : 0)) / settings.height } }); } else if (e.key === 'Enter') onSelect(caption.id); }}>

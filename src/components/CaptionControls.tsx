@@ -1,3 +1,6 @@
+import { RichTextEditor } from './RichTextEditor';
+import { GradientControls } from './GradientControls';
+import type { TextRun } from '../shared/rich-text';
 import { memo, useEffect, useMemo, useState } from 'react';
 import { CAPTION_FONTS, captionFontWeight, CAPTION_PRESETS, PRESET_CATEGORIES, KIND_LABEL, effectiveStyle, captionSpans, presetPatch, type Caption, type CaptionStyle, type CaptionLibrary, type CaptionMotion } from '../shared/captions';
 import { NumericInput } from './NumericInput';
@@ -35,11 +38,12 @@ type Props = {
   project: Project; caption: Caption; frame: number; disabled: boolean;
   libraryState: ReturnType<typeof useCaptionLibrary>;
   onStyle(patch: Partial<CaptionStyle>, common: boolean): void; onRange(a: number, b: number): void; onReset(): void; onAlignAll(): void;
-  onBegin(): void; onEnd(): void; onMargins(m: Project['captionSettings']['margins']): void; onError(message: string): void;
-  onDuplicate(): void; onDelete(): void; onOrder(direction: -1 | 1): void; onPreview(): void;
+  onBegin(): void; onEnd(cancelled?: boolean): void; onMargins(m: Project['captionSettings']['margins']): void; onError(message: string): void;
+  onText(text: string): void; onRuns(runs: TextRun[]): void; onDuplicate(): void; onDelete(): void; onOrder(direction: -1 | 1): void; onPreview(): void;
+  onPrepareGroup(): void;
 };
-export function CaptionControls({ project, caption, frame, disabled, libraryState, onStyle, onRange, onReset, onAlignAll, onBegin, onEnd, onMargins, onDuplicate, onDelete, onOrder, onPreview }: Props) {
-  const [common, setCommon] = useState(false), [tab, setTab] = useState<'style' | 'decorate' | 'motion'>('style');
+export function CaptionControls({ project, caption, frame, disabled, libraryState, onStyle, onRange, onReset, onAlignAll, onBegin, onEnd, onMargins, onText, onRuns, onDuplicate, onDelete, onOrder, onPreview, onPrepareGroup }: Props) {
+  const [common, setCommon] = useState(false), [tab, setTab] = useState<'text' | 'style' | 'decorate' | 'motion'>('style');
   const { library, loaded, saving } = libraryState;
   const [name, setName] = useState(''), [managed, setManaged] = useState<string>(), [rename, setRename] = useState('');
   const [filter, setFilter] = useState('all'), [category, setCategory] = useState('all'), [query, setQuery] = useState(''), [includeLayout, setIncludeLayout] = useState(false);
@@ -65,9 +69,9 @@ export function CaptionControls({ project, caption, frame, disabled, libraryStat
   type NumericKey = 'size' | 'outline' | 'outer' | 'radius' | 'padding' | 'shadow' | 'opacity' | 'maxWidth' | 'lineHeight';
   const number = (key: NumericKey, label: string, min: number, max: number, step = 1, factor = 1) => {
     const update = (n: number) => { if (Number.isFinite(n)) change({ [key]: Math.max(min, Math.min(max, n)) / factor }); };
-    return <div className="caption-number"><label htmlFor={`caption-${key}`}>{label}</label><div><input type="range" aria-label={`${label} 슬라이더`} min={min} max={max} step={step} value={style[key] * factor} disabled={disabled} onFocus={onBegin} onBlur={onEnd} onPointerDown={onBegin} onPointerUp={onEnd} onChange={e => update(e.target.valueAsNumber)} /><NumericInput key={`${caption.id}-${common}-${key}`} id={`caption-${key}`} label={label} min={min} max={max} step={step} value={Number((style[key] * factor).toFixed(3))} disabled={disabled} onCommit={update} /></div></div>;
+    return <div className="caption-number"><label htmlFor={`caption-${key}`}>{label}</label><div><input type="range" aria-label={`${label} 슬라이더`} min={min} max={max} step={step} value={style[key] * factor} disabled={disabled} onFocus={onBegin} onBlur={() => onEnd()} onPointerDown={onBegin} onPointerUp={() => onEnd()} onChange={e => update(e.target.valueAsNumber)} /><NumericInput key={`${caption.id}-${common}-${key}`} id={`caption-${key}`} label={label} min={min} max={max} step={step} value={Number((style[key] * factor).toFixed(3))} disabled={disabled} onCommit={update} /></div></div>;
   };
-  const color = (key: 'color' | 'outlineColor' | 'outerColor' | 'background', label: string) => <label>{label}<input type="color" aria-label={label} value={style[key]} disabled={disabled} onFocus={onBegin} onBlur={onEnd} onChange={e => change({ [key]: e.target.value })} /></label>;
+  const color = (key: 'color' | 'outlineColor' | 'outerColor' | 'background', label: string) => <label>{label}<input type="color" aria-label={label} value={style[key]} disabled={disabled} onFocus={onBegin} onBlur={() => onEnd()} onChange={e => change({ [key]: e.target.value })} /></label>;
   const toggle = (key: 'outline' | 'outer' | 'opacity' | 'shadow', label: string, fallback: number) => <label className="caption-check"><input type="checkbox" aria-label={label} checked={style[key] > 0} disabled={disabled} onChange={e => change({ [key]: e.target.checked ? fallback : 0 })} />{label}</label>;
   function motionEdge(edge: 'enter' | 'exit') {
     const value = style.motion[edge], label = edge === 'enter' ? '등장' : '퇴장';
@@ -78,11 +82,13 @@ export function CaptionControls({ project, caption, frame, disabled, libraryStat
   }
   return <div className="caption-controls">
     <h2>{KIND_LABEL[caption.kind]}</h2><div className="caption-object-actions"><button disabled={disabled || project.captions.length >= 2000} aria-label="자막 복제" title="자막 복제" onClick={onDuplicate}>복제</button><button disabled={disabled} aria-label="자막 삭제" title="자막 삭제" onClick={onDelete}>삭제</button><button disabled={disabled} aria-label="앞으로 가져오기" title="앞으로 가져오기" onClick={() => onOrder(1)}>앞으로</button><button disabled={disabled} aria-label="뒤로 보내기" title="뒤로 보내기" onClick={() => onOrder(-1)}>뒤로</button></div>
-    <CaptionTiming project={project} caption={caption} frame={frame} disabled={disabled} onRange={onRange} />
+    {tab !== 'text' && <><CaptionTiming project={project} caption={caption} frame={frame} disabled={disabled} onRange={onRange} />
     <label className="caption-scope">적용 대상<select aria-label="자막 적용 대상" value={common ? 'common' : 'one'} disabled={disabled} onChange={e => setCommon(e.target.value === 'common')}><option value="one">이 자막만</option><option value="common">{KIND_LABEL[caption.kind]} 공통</option></select></label>
-    <p className="caption-scope-hint">{common ? '기본값을 사용하는 같은 종류의 자막에 함께 적용됩니다.' : '선택한 자막만 조절합니다.'}</p>
-    <div className="caption-tabs" role="tablist" aria-label="자막 속성 탭">{([['style', '스타일'], ['decorate', '꾸미기'], ['motion', '움직임']] as const).map(([id, label]) => <button role="tab" aria-selected={tab === id} key={id} onClick={() => setTab(id)}>{label}</button>)}</div>
+    <p className="caption-scope-hint">{common ? '기본값을 사용하는 같은 종류의 자막에 함께 적용됩니다.' : '선택한 자막만 조절합니다.'}</p></>}
+    <div className="caption-tabs" role="tablist" aria-label="자막 속성 탭">{([['text', '문구'], ['style', '스타일'], ['decorate', '꾸미기'], ['motion', '움직임']] as const).map(([id, label]) => <button role="tab" aria-selected={tab === id} key={id} onClick={() => setTab(id)}>{label}</button>)}</div>
+    {tab === 'text' && <RichTextEditor key={caption.id} caption={caption} style={effectiveStyle(project, caption)} disabled={disabled} onText={onText} onRuns={onRuns} onBegin={onBegin} onEnd={onEnd} />}
     {tab === 'style' && <section aria-label="자막 스타일">
+      <div className="property-group"><button disabled={libraryDisabled} onClick={onPrepareGroup}>제목·꾸미기 함께 저장하기</button><p className="hint">현재 화면의 글과 도형을 골라 왼쪽에서 기본 자막 스타일로 저장할 수 있습니다.</p></div>
       <div className="caption-library-tabs">{[['all', '전체'], ['favorites', '★ 즐겨찾기'], ['saved', '내 스타일']].map(([id, label]) => <button key={id} aria-pressed={filter === id} onClick={() => { setFilter(id); setCategory('all'); }}>{label}</button>)}</div>
       <div className="caption-search"><input aria-label="자막 스타일 검색" placeholder="스타일 이름 검색" value={query} onChange={e => setQuery(e.target.value)} /><select aria-label="자막 스타일 분류" value={category} onChange={e => setCategory(e.target.value)}><option value="all">모든 분위기</option>{PRESET_CATEGORIES.map(c => <option key={c}>{c}</option>)}</select></div>
       <label className="caption-check"><input type="checkbox" checked={includeLayout} onChange={e => setIncludeLayout(e.target.checked)} />크기·위치도 적용</label>
@@ -96,7 +102,7 @@ export function CaptionControls({ project, caption, frame, disabled, libraryStat
     {tab === 'decorate' && <section aria-label="자막 꾸미기">
       <div className="property-group"><h3>글자</h3><label>글꼴<select aria-label="자막 글꼴" value={style.font} disabled={disabled} onChange={e => { const font = e.target.value as CaptionStyle['font']; change({ font, weight: captionFontWeight(font, style.weight) }); }}>{Object.entries(CAPTION_FONTS).map(([id, font]) => <option key={id} value={id}>{font.label}</option>)}</select></label><label>굵기<select aria-label="자막 굵기" value={captionFontWeight(style.font, style.weight)} disabled={disabled} onChange={e => change({ weight: Number(e.target.value) })}>{CAPTION_FONTS[style.font].weights.map(w => <option key={w} value={w}>{w}</option>)}</select></label>{number('size', '자막 글자 크기', 16, 200)}{color('color', '글씨 색상')}</div>
       <div className="property-group"><h3>외곽선</h3>{toggle('outline', '외곽선 사용', 3)}{number('outline', '외곽선 두께', 0, 16)}{color('outlineColor', '외곽선 색상')}{toggle('outer', '이중 외곽선 사용', 3)}{number('outer', '바깥 외곽선 두께', 0, 16)}{color('outerColor', '바깥 외곽선 색상')}</div>
-      <div className="property-group"><h3>배경</h3>{toggle('opacity', '배경 사용', .8)}{color('background', '자막 배경 색상')}{number('opacity', '배경 불투명도 (%)', 0, 100, 1, 100)}{number('radius', '배경 둥글기', 0, 60)}{number('padding', '배경 안쪽 여백', 0, 60)}</div>
+      <div className="property-group"><h3>배경</h3>{toggle('opacity', '배경 사용', .8)}{color('background', '자막 배경 색상')}<GradientControls value={style.gradient} color={style.background} disabled={disabled} onChange={gradient => change({ gradient, opacity: gradient && style.opacity === 0 ? .9 : style.opacity })} />{number('opacity', '배경 불투명도 (%)', 0, 100, 1, 100)}{number('radius', '배경 둥글기', 0, 60)}{number('padding', '배경 안쪽 여백', 0, 60)}</div>
       <div className="property-group"><h3>그림자</h3>{toggle('shadow', '그림자 사용', 4)}{number('shadow', '그림자 강도', 0, 20)}</div>
       <div className="property-group"><h3>문단과 배치</h3><label>문단 정렬<select aria-label="자막 문단 정렬" value={style.align} disabled={disabled} onChange={e => change({ align: e.target.value as CaptionStyle['align'] })}><option value="left">왼쪽</option><option value="center">가운데</option><option value="right">오른쪽</option></select></label>{number('lineHeight', '자막 줄 간격', 1.2, 2.4, .1)}{number('maxWidth', '자막 최대 폭 (%)', 20, 100, 1, 100)}
       <div className="position-grid" aria-label="자막 9방향 정렬">{([0, .5, 1] as const).flatMap((v, row) => ([0, .5, 1] as const).map((h, col) => <button key={`${h}-${v}`} disabled={disabled} aria-label={`자막 ${['위', '가운데', '아래'][row]} ${['왼쪽', '중앙', '오른쪽'][col]}`} aria-pressed={style.position.h === h && style.position.v === v && style.position.x === null && style.position.y === null} onClick={() => change({ position: { h, v, x: null, y: null } })}>{['↖', '↑', '↗', '←', '●', '→', '↙', '↓', '↘'][row * 3 + col]}</button>))}</div><button disabled={disabled} onClick={onAlignAll}>같은 종류 모두 크기·위치 맞추기</button></div>

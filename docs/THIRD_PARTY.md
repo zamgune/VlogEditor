@@ -65,4 +65,12 @@ UI는 Windows에 설치된 **맑은 고딕(Malgun Gothic) / Segoe UI**를 참조
 | MaruBuri-SemiBold.ttf | 600 | 2D86F0B4950955FB69F069C415D01A51BBBBCF03682D59A6ADAB7F5B05D16FE5 |
 | MaruBuri-Bold.ttf | 700 | 13AA1058C135E8F0B2C41DE4E5E7866B18F970A15DB2B1A290227E52DC02ABA8 |
 
+## 나눔손글씨 펜
+
+사용자가 제공한 `nanum-pen/NanumPen.ttf`를 수정 없이 포함합니다. 파일 메타데이터: Nanum Pen Script / 나눔손글씨 펜, Regular, Copyright © 2010 NHN Corporation. Font designed by Sandoll Communications Inc.
+
+[네이버 공식 라이선스 안내](https://help.naver.com/service/30016/contents/18088?osType=PC)에서 NanumPen의 SIL Open Font License 1.1 및 소프트웨어 번들 배포 조건을 확인했습니다(2026-10-05). 저작권 고지와 라이선스 전문은 `public/fonts/NanumPen-OFL.txt`에 동봉합니다.
+
+SHA-256: `0E1E2CC07FD5C5D181936ECAF97363263A8D4AE6B6151039EA83CB9002B63152`
+
 ExtraLight의 파일 내부 weight 값은 Light와 같은 300이지만 별도 서체를 선택할 수 있도록 CSS에서 200으로 연결합니다. 파일 자체는 변경하지 않았습니다.

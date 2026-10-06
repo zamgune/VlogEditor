@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { stat, mkdir, rename, rm, access, copyFile } from 'node:fs/promises';
-import { constants } from 'node:fs';
+import { stat, mkdir, rename, rm, access } from 'node:fs/promises';
+import { availableParallelism } from 'node:os';
 import { basename, join, dirname, resolve } from 'node:path';
 import { FPS, duration, ProjectSchema, type Media, type Project } from '../src/shared/project';
 import { binPath, run, progressReader, CancelledError } from './process';
@@ -9,6 +9,8 @@ import { canvasSettings, DEFAULT_FRAMING, framingFilter, type CanvasSettings, ty
 import type { CaptionEngine } from './captions';
 import type { NarrationStore } from './narration';
 import { audibleNarrations, narrationFilter } from '../src/shared/narration';
+import { destinationStamp, publishExport } from './export-destination';
+import type { ExportStatus } from '../src/shared/api';
 
 type Stream = { codec_type: string; codec_name: string; width?: number; height?: number; avg_frame_rate?: string; r_frame_rate?: string; time_base?: string; start_time?: string; duration?: string; nb_frames?: string; color_transfer?: string; color_primaries?: string; color_space?: string; pix_fmt?: string; sample_aspect_ratio?: string; tags?: { rotate?: string }; side_data_list?: { rotation?: number }[] };
 export type Probe = { streams: Stream[]; format: { duration?: string; format_name?: string; start_time?: string } };
@@ -95,7 +97,8 @@ export class MediaEngine {
       '-color_range', 'pc', '-color_trc', 'iec61966-2-1', '-f', 'image2pipe', '-c:v', 'png', 'pipe:1'], { signal });
     return `data:image/png;base64,${result.stdout.toString('base64')}`;
   }
-  async export(project: Project, destination: string, signal?: AbortSignal, onProgress: (p: number) => void = () => {}) {
+  async export(project: Project, destination: string, signal?: AbortSignal, onProgress: (p: number, status?: ExportStatus) => void = () => {}, options: { overwrite?: string } = {}) {
+    onProgress(0, { stage: 'prepare' });
     this.validate(project);
     if (project.narrations.length && !this.narrations) throw new Error('녹음 파일을 사용할 수 없습니다.');
     await this.narrations?.validate(project.narrations);
@@ -105,21 +108,26 @@ export class MediaEngine {
     if (!destination.toLowerCase().endsWith('.mp4')) throw new Error('MP4 파일 이름을 사용해 주세요.');
     const dest = resolve(destination).toLowerCase();
     if (dest.startsWith(resolve(this.cache).toLowerCase() + '\\') || project.media.some(m => resolve(m.path).toLowerCase() === dest)) throw new Error('원본이나 캐시 파일에 덮어쓸 수 없습니다.');
-    try { await access(destination); throw new Error('이미 존재하는 파일입니다. 새 출력 이름을 선택해 주세요.'); }
-    catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; }
+    const existing = await destinationStamp(destination);
+    if (existing !== options.overwrite) throw new Error('이미 존재하거나 변경된 파일입니다. 저장 창에서 덮어쓰기를 확인해 주세요.');
     // Detect replaced/moved source files before export, even if a cached copy still exists.
     for (const m of project.media) if (await fingerprint(m.path) !== m.fingerprint) throw new Error(`원본이 변경되었습니다: ${m.name}`);
     const temp = join(dirname(destination), `.vlogtool-${randomUUID()}.partial.mp4`);
-    if (project.captions.some(c => c.text.trim()) && !this.captions) throw new Error('자막 렌더러를 사용할 수 없습니다.');
-    const overlay = await this.captions?.overlay(project, signal, p => onProgress(p * .2));
+    if ((project.captions.some(c => c.text.trim()) || project.decorations.length) && !this.captions) throw new Error('자막 렌더러를 사용할 수 없습니다.');
+    const overlay = await this.captions?.overlay(project, signal, p => onProgress(p * .2, { stage: 'captions', stagePercent: p }));
     try {
-      const args = ['-hide_banner', '-nostdin', '-v', 'warning', '-n', '-filter_complex_threads', '2'];
+      const threads = String(Math.max(2, Math.min(8, availableParallelism() - 2)));
+      const args = ['-hide_banner', '-nostdin', '-v', 'warning', '-n', '-filter_complex_threads', threads];
       const filters: string[] = [];
       project.clips.forEach((clip, i) => {
-        args.push('-i', this.assets.get(clip.mediaId)!.proxy);
+        // Seek by whole seconds, then trim the remaining frames/samples. This
+        // avoids decoding the discarded prefix without fractional seek rounding
+        // dropping a frame or shifting the 48 kHz audio at the cut.
+        const seek = Math.floor(clip.inFrame / FPS), start = clip.inFrame - seek * FPS, end = clip.outFrame - seek * FPS;
+        args.push('-ss', String(seek), '-threads', '2', '-i', this.assets.get(clip.mediaId)!.proxy);
         const media = this.assets.get(clip.mediaId)!.media;
-        filters.push(`[${i}:v]trim=start_frame=${clip.inFrame}:end_frame=${clip.outFrame},setpts=PTS-STARTPTS,${colorFilter(clip.color)},${framingFilter(media.displayWidth!, media.displayHeight!, project.settings, clip.framing)}[v${i}]`);
-        filters.push(`[${i}:a]atrim=start_sample=${clip.inFrame * 1600}:end_sample=${clip.outFrame * 1600},asetpts=PTS-STARTPTS,volume=${clip.volume}[a${i}]`);
+        filters.push(`[${i}:v]trim=start_frame=${start}:end_frame=${end},setpts=PTS-STARTPTS,${colorFilter(clip.color)},${framingFilter(media.displayWidth!, media.displayHeight!, project.settings, clip.framing)}[v${i}]`);
+        filters.push(`[${i}:a]atrim=start_sample=${start * 1600}:end_sample=${end * 1600},asetpts=PTS-STARTPTS,volume=${clip.volume}[a${i}]`);
       });
       filters.push(`${project.clips.map((_, i) => `[v${i}][a${i}]`).join('')}concat=n=${project.clips.length}:v=1:a=1[v][a]`);
       if (overlay) {
@@ -134,17 +142,18 @@ export class MediaEngine {
       });
       if (takes.length) filters.push(`[a]${takes.map((_, i) => `[voice${i}]`).join('')}amix=inputs=${takes.length + 1}:duration=first:dropout_transition=0:normalize=0,alimiter=limit=1:level=0:latency=1,atrim=end_sample=${total * 1600}[mixed]`);
       args.push('-filter_complex', filters.join(';'), '-map', overlay ? '[outv]' : '[v]', '-map', takes.length ? '[mixed]' : '[a]', '-frames:v', String(total), '-r', '30',
-        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-threads', '2', '-pix_fmt', 'yuv420p',
+        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-threads', threads, '-pix_fmt', 'yuv420p',
         '-c:a', 'aac', '-b:a', '192k', '-ar', '48000', '-ac', '2', '-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709', '-color_range', 'tv', '-movflags', '+faststart', '-progress', 'pipe:1', '-nostats', temp);
-      await run(binPath(this.root, 'ffmpeg'), args, { signal, onOutput: progressReader(total, p => onProgress(overlay ? 20 + p * .8 : p)) });
+      onProgress(overlay ? 20 : 0, { stage: 'encode', stagePercent: 0, renderedFrames: 0, totalFrames: total });
+      await run(binPath(this.root, 'ffmpeg'), args, { signal, onOutput: progressReader(total, (p, frames) => onProgress(overlay ? 20 + p * .78 : p * .98, { stage: 'encode', stagePercent: p, renderedFrames: frames, totalFrames: total })) });
+      onProgress(98, { stage: 'verify' });
       const checked = await probe(this.root, temp, signal);
       const v = checked.streams.find(s => s.codec_type === 'video'), a = checked.streams.find(s => s.codec_type === 'audio');
       if (!v || Number(v.nb_frames) !== total || v.width !== project.settings.width || v.height !== project.settings.height || v.codec_name !== 'h264' || a?.codec_name !== 'aac') throw new Error('출력 검증에 실패했습니다. 완성 파일을 만들지 않았습니다.');
       if (signal?.aborted) throw new CancelledError();
-      // COPYFILE_EXCL ensures even a last-second path collision cannot overwrite an original.
-      await copyFile(temp, destination, constants.COPYFILE_EXCL);
-      if (signal?.aborted) { await rm(destination, { force: true }); throw new CancelledError(); }
-      onProgress(100); return destination;
+      onProgress(99, { stage: 'save' });
+      await publishExport(temp, destination, options.overwrite, signal);
+      onProgress(100, { stage: 'done' }); return destination;
     } finally { await rm(temp, { force: true }); await overlay?.cleanup(); }
   }
 }

@@ -3,7 +3,8 @@ import type { Color } from './color';
 import type { CanvasSettings, Framing } from './canvas';
 import type { CaptionRenderRequest, CaptionBitmap, CaptionLibrary } from './captions';
 import type { Narration, RecordingInput } from './narration';
-export type TaskProgress = { kind: 'import' | 'export'; percent: number; message: string };
+export type ExportStatus = { stage: 'prepare' | 'captions' | 'encode' | 'verify' | 'save' | 'done'; stagePercent?: number; renderedFrames?: number; totalFrames?: number };
+export type TaskProgress = { kind: 'import' | 'export'; percent: number; message: string; exportStatus?: ExportStatus };
 export type OpenResult = { project: Project; path: string | null; missing: string[] };
 export interface EditorAPI {
   microphoneAccess(enabled: boolean): Promise<void>;

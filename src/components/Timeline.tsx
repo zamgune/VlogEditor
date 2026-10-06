@@ -1,3 +1,4 @@
+import { decorationRows } from '../shared/decoration';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
 import { CaptionLane } from './CaptionLane';
 import { narrationEnd, narrationRows, type Narration } from '../shared/narration';
@@ -5,7 +6,7 @@ import { captionRows, captionSpans, KIND_LABEL } from '../shared/captions';
 import { duration, timecode, type Clip, type Project } from '../shared/project';
 import { edgeScrollSpeed, pointerFrame, reorderTarget, trimFromDrag, type TrimEdge } from '../shared/timeline';
 
-type Props = { onNarrationSelect(n: Narration): void; selectedCaption?: string; onCaptionSelect(id: string): void; onCaptionRange(id: string, a: number, b: number): void; onCaptionBegin(): void; onCaptionEnd(cancelled?: boolean): void; project: Project; selected?: string; frame: number; zoom: number; disabled: boolean;
+type Props = { selectedShape?: string; onShapeSelect(id: string): void; onNarrationSelect(n: Narration): void; selectedCaption?: string; onCaptionSelect(id: string): void; onCaptionRange(id: string, a: number, b: number): void; onCaptionBegin(): void; onCaptionEnd(cancelled?: boolean): void; project: Project; selected?: string; frame: number; zoom: number; disabled: boolean;
   onSeek(frame: number): void; onZoom(zoom: number): void; onSelect(id: string): void;
   onScrubChange(scrubbing: boolean): void; onReorder(from: number, to: number): void;
   onMoveChange(moving: boolean): void;
@@ -31,6 +32,9 @@ export function Timeline(props: Props) {
   const zoomAnchor = useRef<{ seconds: number; x: number } | null>(null);
   const total = duration(project);
   const voiceRows = useMemo(() => narrationRows(project.narrations, total), [project.narrations, total]);
+  const frontTrim = gesture.current?.mode === 'trim' && gesture.current.edge === 'start' ? gesture.current : null;
+  const frontDelta = frontTrim ? ((project.clips.find(c => c.id === frontTrim.clip.id)?.inFrame ?? frontTrim.clip.inFrame) - frontTrim.clip.inFrame) / 30 * zoom : 0;
+  const frontStart = frontTrim ? project.clips.slice(0, project.clips.findIndex(c => c.id === frontTrim.clip.id)).reduce((sum, c) => sum + c.outFrame - c.inFrame, 0) / 30 * zoom : 0;
   const width = Math.max(800, total / 30 * zoom + 80, gesture.current?.mode === 'trim' ? gesture.current.scrollWidth : 0);
   const ghostWidth = movePreview ? Math.max(100, (project.clips[movePreview.from].outFrame - project.clips[movePreview.from].inFrame) / 30 * zoom) : 0;
   const tickSeconds = zoom < 45 ? 5 : zoom < 90 ? 2 : 1;
@@ -157,20 +161,21 @@ export function Timeline(props: Props) {
     }
   }, [zoom]);
   const captionTracks = useMemo(() => { const spans = captionSpans(project); return (['normal', 'emphasis', 'title'] as const).map(kind => ({ kind, count: captionRows(spans.filter(s => s.caption.kind === kind)).length })); }, [project]);
+  const shapes = useMemo(() => decorationRows(project), [project]);
   let trackStart = 0;
-  return <div className="track-area"><div className="track-labels" ref={trackLabels}><div className="ruler-label">분:초:프레임</div><div>▰ <strong>영상</strong><span>{project.clips.length}</span></div><div className="narration-track-label" style={{ height: voiceRows.length * 32 }}>● 음성 녹음</div>{captionTracks.map(({ kind, count }) => <div key={kind} className={`caption-track-label ${kind}`} style={{ height: count * 34 }}>T {KIND_LABEL[kind]}{count > 1 ? ` · ${count}줄` : ''}</div>)}</div>
+  return <div className="track-area"><div className="track-labels" ref={trackLabels}><div className="ruler-label">분:초:프레임</div><div>▰ <strong>영상</strong><span>{project.clips.length}</span></div><div className="narration-track-label" style={{ height: voiceRows.length * 32 }}>● 음성 녹음</div>{captionTracks.map(({ kind, count }) => <div key={kind} className={`caption-track-label ${kind}`} style={{ height: count * 34 }}>T {KIND_LABEL[kind]}{count > 1 ? ` · ${count}줄` : ''}</div>)}{shapes.length > 0 && <div className="caption-track-label" style={{ height: shapes.length * 34 }}>◇ 꾸미기</div>}</div>
     <div className={`track-scroll ${movePreview ? 'moving-clip' : ''}`} ref={viewport} onScroll={e => { if (trackLabels.current) trackLabels.current.style.transform = `translateY(${-e.currentTarget.scrollTop}px)`; }} tabIndex={-1} onPointerDown={startGesture}
       onPointerMove={e => { if (gesture.current?.pointerId === e.pointerId) { gesture.current.x = e.clientX; if (gesture.current.mode === 'move') gesture.current.y = e.clientY; } }}
       onPointerUp={e => { if (gesture.current?.pointerId === e.pointerId) { gesture.current.x = e.clientX; if (gesture.current.mode === 'move') gesture.current.y = e.clientY; endGesture(); } }}
       onPointerCancel={() => endGesture(true)} onLostPointerCapture={() => endGesture(true)}>
-      <div className="track-content" style={{ width, minHeight: 102 + voiceRows.length * 32 + captionTracks.reduce((n, t) => n + t.count * 34, 0) }}>
+      <div className="track-content" style={{ width, minHeight: 102 + shapes.length * 34 + voiceRows.length * 32 + captionTracks.reduce((n, t) => n + t.count * 34, 0) }}>
         <div className="ruler" aria-label="타임라인 눈금">{Array.from({ length: Math.ceil(width / (zoom * tickSeconds)) }, (_, i) => <span key={i} style={{ left: i * zoom * tickSeconds }}>{timecode(i * tickSeconds * 30)}</span>)}</div>
         <div className="video-track" ref={videoTrack}>{project.clips.map((clip, i) => {
           const start = trackStart; trackStart += clip.outFrame - clip.inFrame;
           const media = project.media.find(m => m.id === clip.mediaId)!;
           return <div key={clip.id} data-testid="timeline-clip" role="button" tabIndex={disabled ? -1 : 0} aria-label={`클립 ${i + 1} ${media.name}`} aria-pressed={selected === clip.id}
             title="클릭해서 선택 · 누른 채 끌어서 위치 이동"
-            className={`timeline-clip cover-${i % 3} ${selected === clip.id ? 'selected' : ''} ${props.trimming?.clipId === clip.id ? 'trimming' : ''} ${movePreview?.clipId === clip.id ? 'move-source' : ''} ${(clip.outFrame - clip.inFrame) / 30 * zoom < 44 ? 'compact-clip' : ''}`} style={{ width: (clip.outFrame - clip.inFrame) / 30 * zoom }}
+            className={`timeline-clip cover-${i % 3} ${selected === clip.id ? 'selected' : ''} ${props.trimming?.clipId === clip.id ? 'trimming' : ''} ${movePreview?.clipId === clip.id ? 'move-source' : ''} ${(clip.outFrame - clip.inFrame) / 30 * zoom < 44 ? 'compact-clip' : ''}`} style={{ width: (clip.outFrame - clip.inFrame) / 30 * zoom, marginLeft: frontTrim?.clip.id === clip.id ? frontDelta : undefined }}
             onPointerDown={e => startMove(e, i, start)}
             onKeyDown={e => { if (e.target === e.currentTarget && !disabled && !gesture.current && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); e.stopPropagation(); onSelect(clip.id); onSeek(start); } }}>
             <button className="trim-handle trim-start" aria-label={`클립 ${i + 1} 시작 길이 조절`} title="끌어서 시작 부분 자르기 · Esc 취소" disabled={disabled}
@@ -181,7 +186,7 @@ export function Timeline(props: Props) {
               onPointerDown={e => startMove(e, i, start)} onClick={e => { e.stopPropagation(); onSelect(clip.id); }}>⠿</button>
             <strong>{media.name}</strong><span>{timecode(clip.outFrame - clip.inFrame)}</span>
           </div>;
-        })}{!total && <div className="empty-track">가져온 영상이 순서대로 놓입니다</div>}</div>
+        })}{frontDelta > 0 && <div className="trim-removed" data-testid="trim-removed" style={{ left: frontStart, width: frontDelta }}><span>잘라낼 부분</span></div>}{!total && <div className="empty-track">가져온 영상이 순서대로 놓입니다</div>}</div>
         {movePreview && <>
           {movePreview.allowed && movePreview.to !== movePreview.from && <div className="drop-marker" data-testid="drop-marker" style={{ left: movePreview.boundary }} />}
           <div className={`move-ghost cover-${movePreview.from % 3}`} data-testid="move-ghost" style={{ left: Math.max(0, Math.min(width - ghostWidth, movePreview.left)), width: ghostWidth }}>
@@ -191,7 +196,8 @@ export function Timeline(props: Props) {
         </>}
         <div className="narration-track" style={{ height: voiceRows.length * 32 }}>{voiceRows.flatMap((row, i) => row.map(n => <button key={n.id} data-testid="narration-block" className={n.muted ? 'muted' : ''} disabled={disabled} aria-label={`녹음 ${n.name}`} title={`${n.name} · ${timecode(n.startFrame)}부터`} style={{ left: n.startFrame / 30 * zoom, width: Math.max(3, (narrationEnd(n, total) - n.startFrame) / 30 * zoom), top: i * 32 + 2 }} onPointerDown={e => e.stopPropagation()} onClick={() => props.onNarrationSelect(n)}>● {n.name}</button>))}</div>
         {(['normal', 'emphasis', 'title'] as const).map(kind => <CaptionLane key={kind} kind={kind} project={project} zoom={zoom} selected={props.selectedCaption} disabled={disabled} onSelect={props.onCaptionSelect} onRange={props.onCaptionRange} onBegin={props.onCaptionBegin} onEnd={props.onCaptionEnd} />)}
-        {total > 0 && <div className="playhead" style={{ left: frame / 30 * zoom }}><span role="slider" tabIndex={0} aria-label="재생 위치" aria-valuemin={0} aria-valuemax={total - 1} aria-valuenow={frame} aria-valuetext={timecode(frame)} title="잡고 끌어서 영상 탐색" /></div>}
+        {shapes.length > 0 && <div className="caption-lane decoration-lane" style={{ height: shapes.length * 34 }} aria-label="꾸미기 트랙" onPointerDown={e => e.stopPropagation()}>{shapes.flatMap((row, i) => row.map(s => <button key={s.shape.id} data-testid="decoration-block" className={`caption-block ${props.selectedShape === s.shape.id ? 'selected' : ''}`} aria-label={`도형 ${s.shape.name}`} title="클릭한 뒤 오른쪽에서 표시 시간을 조절하세요" disabled={disabled} style={{ top: i * 34 + 4, left: s.start / 30 * zoom, width: Math.max(2, (s.end - s.start) / 30 * zoom) }} onClick={() => props.onShapeSelect(s.shape.id)}>{s.shape.name}</button>))}</div>}
+        {total > 0 && <div className="playhead" style={{ left: frame / 30 * zoom + frontDelta }}><span role="slider" tabIndex={0} aria-label="재생 위치" aria-valuemin={0} aria-valuemax={total - 1} aria-valuenow={frame} aria-valuetext={timecode(frame)} title="잡고 끌어서 영상 탐색" /></div>}
       </div>
     </div>
   </div>;

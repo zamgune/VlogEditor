@@ -74,7 +74,7 @@ try {
   await page.getByRole('button', { name: '저장 Ctrl S' }).click();
   await expect.poll(async () => { try { return (await stat(saved)).size; } catch { return 0; } }).toBeGreaterThan(100);
   const project = JSON.parse(await readFile(saved, 'utf8'));
-  expect(project.version).toBe(7); expect(project.settings).toEqual({ width: 1080, height: 1920, fps: 30, color: 'SDR', fit: 'cover', background: '#ffffff' });
+  expect(project.version).toBe(8); expect(project.settings).toEqual({ width: 1080, height: 1920, fps: 30, color: 'SDR', fit: 'cover', background: '#ffffff' });
   expect(project.clips.map((c: any) => c.framing.fit)).toEqual(['contain', 'inherit']);
   const exported = join(outputDir, '9대16 숏츠.mp4');
   await app.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, exported);

@@ -24,6 +24,16 @@ export function colorFilter(color: Color): string {
   if (isNeutralColor(color)) return 'null';
   const matrix = colorMatrix(color);
   const channels = ['r', 'g', 'b'];
+  // An opaque alpha channel supplies the affine bias. The native mixer applies
+  // the same matrix with a single final clamp, without evaluating expressions
+  // for every component of every pixel. Extreme gains use the full-range path.
+  const coefficients = channels.flatMap((channel, row) =>
+    [...channels.map((component, column) => ({ name: channel + component, value: matrix[row * 5 + column] })),
+      { name: channel + 'a', value: matrix[row * 5 + 4] }]);
+  if (coefficients.every(c => Math.abs(c.value) <= 2)) {
+    const mixer = coefficients.map(c => `${c.name}=${c.value.toFixed(8)}`).join(':');
+    return `scale=iw:ih:in_color_matrix=bt709:in_range=tv:out_range=full,format=gbrp,format=gbrap,setparams=range=full,colorchannelmixer=${mixer},format=gbrp,scale=iw:ih:out_color_matrix=bt709:in_range=full:out_range=tv,format=yuv420p,setparams=colorspace=bt709:range=limited`;
+  }
   const expressions = channels.map((channel, row) => {
     const offset = row * 5;
     const expression = channels.map((component, column) => `${matrix[offset + column].toFixed(8)}*${component}(X,Y)`).join('+');

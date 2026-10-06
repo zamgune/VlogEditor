@@ -57,7 +57,7 @@ try {
   results.push({ratio:preset.id,mean,placement,path}); console.log(JSON.stringify(results.at(-1)));
  }
  let many=structuredClone(base); many.captions=[];
- for(const clip of many.clips) for(let n=0;n<99;n++) many.captions.push({id:crypto.randomUUID(),clipId:clip.id,kind:'normal',zOrder:n,text:`메모 ${n+1}`,inFrame:n,outFrame:n+1,overrides:{}});
+ for(const clip of many.clips) for(let n=0;n<99;n++) many.captions.push({id:crypto.randomUUID(),clipId:clip.id,kind:'normal',runs:[],zOrder:n,text:`메모 ${n+1}`,inFrame:n,outFrame:n+1,overrides:{}});
  many=addCaption(many,many.clips[0].id,'title',0).project; many=addCaption(many,many.clips[0].id,'emphasis',0).project; expect(many.captions.length).toBe(200);
  const manyPath=join(out,'200-captions.vlog.json');await writeFile(manyPath,JSON.stringify(many)); await app.evaluate(({dialog},path)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths:[path]});},manyPath);await page.getByRole('button',{name:'열기',exact:true}).click();await expect(page.getByTestId('caption-block')).toHaveCount(200,{timeout:60000});
  await page.getByRole('button',{name:'자막 목록 · 200'}).click();await expect(page.locator('.caption-list textarea')).toHaveCount(200);const started=Date.now();const manyVideo=await exportProject(many,'200-captions');results.push({captions:200,exportMs:Date.now()-started,path:manyVideo});

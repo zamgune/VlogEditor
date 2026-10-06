@@ -6,7 +6,7 @@ const media: Media = { id: crypto.randomUUID(), path: 'C:/fixture.mp4', name: 'f
 const fixture = () => addMedia(newProject(), [media, { ...media, id: crypto.randomUUID() }]);
 test('legacy versions migrate to empty captions with responsive default styles', () => {
   const { captions: _, captionSettings: __, ...old } = fixture();
-  for (const version of [1,2,3]) { const p = ProjectSchema.parse({ ...old, version }); assert.equal(p.version, 7); assert.deepEqual(p.captions, []); assert.equal(p.captionSettings.normal.size, 54); }
+  for (const version of [1,2,3]) { const p = ProjectSchema.parse({ ...old, version }); assert.equal(p.version, 8); assert.deepEqual(p.captions, []); assert.equal(p.captionSettings.normal.size, 54); }
 });
 test('new captions start at the playhead; normal ends at clip end and emphasis uses up to 60 frames', () => {
   let p = fixture(); const c = p.clips[0]; const a = addCaption(p, c.id, 'normal', 100); p = a.project;
@@ -39,7 +39,7 @@ test('v4 migration preserves appearance and original normal/title/emphasis order
   const old=JSON.parse(JSON.stringify({...p,version:4}));
   for(const c of old.captions){delete c.zOrder; c.overrides={};}
   for(const kind of ['normal','emphasis','title']){delete old.captionSettings[kind].motion;delete old.captionSettings[kind].align;delete old.captionSettings[kind].lineHeight;}
-  const next=ProjectSchema.parse(old); assert.equal(next.version,7);
+  const next=ProjectSchema.parse(old); assert.equal(next.version,8);
   assert.deepEqual(activeCaptionSpans(next,0).map(s=>s.caption.kind),['normal','title','emphasis']);
   assert.deepEqual(next.captions[0].overrides,{});assert.equal(next.captionSettings.normal.lineHeight,1.4);assert.deepEqual(next.captionSettings.normal.motion,noMotion());
   assert.deepEqual(ProjectSchema.parse(next),next);
@@ -57,7 +57,7 @@ test('overlapping captions offset, duplicate independently, reorder and pack sep
 });
 test('library migrates legacy styles, validates favorites and returns detached appearance patches', () => {
   const legacy=[{id:crypto.randomUUID(),name:'이전 스타일',style:structuredClone(CAPTION_PRESETS[0].style)}];
-  const library=CaptionLibrarySchema.parse(legacy);assert.equal(library.version,2);assert.deepEqual(library.favorites,[]);
+  const library=CaptionLibrarySchema.parse(legacy);assert.equal(library.version,4);assert.deepEqual(library.favorites,[]);
   assert.equal(CAPTION_PRESETS.length,20);assert.equal(new Set(CAPTION_PRESETS.map(p=>p.id)).size,20);
   library.favorites=['builtin:vlog',`user:${legacy[0].id}`];assert.deepEqual(CaptionLibrarySchema.parse(library),library);
   assert.throws(()=>CaptionLibrarySchema.parse({...library,favorites:['user:missing']}));

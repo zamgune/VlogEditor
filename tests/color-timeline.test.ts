@@ -15,7 +15,7 @@ test('version 1 project migrates to neutral colors without changing original cut
   const old = addMedia(newProject(), [media]);
   const input = { ...old, version: 1, clips: old.clips.map(({ color: _, ...clip }) => clip) };
   const migrated = ProjectSchema.parse(input);
-  assert.equal(migrated.version, 7); assert.deepEqual(migrated.clips[0].color, NEUTRAL_COLOR);
+  assert.equal(migrated.version, 8); assert.deepEqual(migrated.clips[0].color, NEUTRAL_COLOR);
   assert.equal(migrated.clips[0].outFrame, 90); assert.equal('color' in input.clips[0], false);
 });
 test('per-clip color survives split and serialization; invalid filter values are rejected', () => {

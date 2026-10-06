@@ -17,7 +17,7 @@ test('multiple titles have independent styles, placement and duplicate IDs, incl
   assert.equal(copy.captions.length, 4); assert.equal(new Set(copy.captions.map(c => c.id)).size, 4);
   assert.notDeepEqual(effectiveStyle(p, p.captions[0]).position, effectiveStyle(p, p.captions[1]).position);
   copy.captions[3].overrides.size = 90; assert.equal(effectiveStyle(p, p.captions[1]).size, 30);
-  const migrated = ProjectSchema.parse({ ...p, version: 6 }); assert.equal(migrated.version, 7); assert.deepEqual(migrated.captions, p.captions);
+  const migrated = ProjectSchema.parse({ ...p, version: 6 }); assert.equal(migrated.version, 8); assert.deepEqual(migrated.captions, p.captions);
   assert.throws(() => ProjectSchema.parse({ ...p, captions: [p.captions[0], p.captions[0]] }));
 });
 test('group snapshots preserve every text, style and placement across defaults, reload, and one-step undo', () => {
@@ -52,7 +52,7 @@ test('subtitle groups adapt safely to trimmed short clips and refuse missing cli
 test('legacy style favorites migrate without data loss and malformed groups are rejected', () => {
   const p = example(), style = { id: crypto.randomUUID(), name: '이전 스타일', style: effectiveStyle(p, p.captions[0]) };
   const old = { version: 1, styles: [style], favorites: [`user:${style.id}`] };
-  const migrated = CaptionLibrarySchema.parse(old); assert.equal(migrated.version, 2); assert.deepEqual(migrated.styles, old.styles); assert.deepEqual(migrated.favorites, old.favorites); assert.deepEqual(migrated.groups, []);
+  const migrated = CaptionLibrarySchema.parse(old); assert.equal(migrated.version, 4); assert.deepEqual(migrated.styles, old.styles); assert.deepEqual(migrated.favorites, old.favorites); assert.deepEqual(migrated.groups, []);
   const group = captureCaptionGroup(p, p.captions.map(c => c.id), '그룹');
   assert.throws(() => CaptionLibrarySchema.parse({ ...migrated, groups: [group, group] }));
   assert.throws(() => CaptionLibrarySchema.parse({ ...migrated, version: 99 }));

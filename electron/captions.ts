@@ -1,3 +1,4 @@
+import { decorationSpans, activeDecorations } from '../src/shared/decoration';
 import { BrowserWindow } from 'electron';
 import { mkdir, writeFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -26,9 +27,10 @@ export class CaptionEngine {
   dispose() { this.window?.destroy(); }
   async overlay(project: Project, signal?: AbortSignal, progress: (n: number) => void = () => {}) {
     const spans = captionSpans(project).filter(s => s.caption.text.trim());
-    if (!spans.length) return undefined;
+    const shapes = decorationSpans(project);
+    if (!spans.length && !shapes.length) return undefined;
     const dir = join(this.cache, randomUUID()); await mkdir(dir, { recursive: true });
-    const boundaries = captionSceneBoundaries(project);
+    const boundaries = [...new Set([...captionSceneBoundaries(project), ...shapes.flatMap(s => [s.start, s.end])])].sort((a, b) => a - b);
     const lines = ['ffconcat version 1.0'];
     const scenes = new Map<string, string>(); let last = '', imageIndex = 0;
     try {
@@ -36,12 +38,13 @@ export class CaptionEngine {
         if (signal?.aborted) throw new CancelledError();
         const captions = spans.filter(s => s.start <= boundaries[i] && s.end > boundaries[i]).sort((a, b) => a.caption.zOrder - b.caption.zOrder).map(s => {
           const style = effectiveStyle(project, s.caption);
-          return { text: s.caption.text, style, width: project.settings.width, height: project.settings.height, transform: captionTransform(style.motion, s.start, s.end, boundaries[i], Math.min(project.settings.width, project.settings.height)) };
+          return { text: s.caption.text, runs: s.caption.runs, style, width: project.settings.width, height: project.settings.height, transform: captionTransform(style.motion, s.start, s.end, boundaries[i], Math.min(project.settings.width, project.settings.height)) };
         });
-        const key = JSON.stringify(captions); let name = scenes.get(key);
+        const decorations = activeDecorations(project, boundaries[i]);
+        const key = JSON.stringify({ captions, decorations }); let name = scenes.get(key);
         if (!name) {
           name = `${imageIndex++}.png`;
-          const url = await this.call<string>('scene', { ...project.settings, margins: project.captionSettings.margins, captions });
+          const url = await this.call<string>('scene', { ...project.settings, margins: project.captionSettings.margins, captions, decorations });
           await writeFile(join(dir, name), Buffer.from(url.split(',')[1], 'base64')); scenes.set(key, name);
           if (scenes.size > 256) scenes.delete(scenes.keys().next().value!);
         }

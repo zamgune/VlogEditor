@@ -12,6 +12,7 @@ import { ColorSchema, NEUTRAL_COLOR } from '../src/shared/color';
 import { CanvasSettingsSchema, FramingSchema, canvasSettings, DEFAULT_FRAMING } from '../src/shared/canvas';
 import type { TaskProgress, OpenResult } from '../src/shared/api';
 import { CaptionEngine } from './captions';
+import { destinationStamp } from './export-destination';
 import { CaptionRenderRequestSchema, CaptionLibrarySchema, emptyCaptionLibrary } from '../src/shared/captions';
 
 app.setName('VlogTool');
@@ -137,7 +138,7 @@ app.whenReady().then(async () => {
   handle('app:status', async () => {
     let ffmpeg = true;
     try { await access(binPath(root, 'ffmpeg')); await access(binPath(root, 'ffprobe')); } catch { ffmpeg = false; }
-    return { ffmpeg, platform: `${process.platform} ${process.arch}`, stage: `${app.getVersion()} · 마이크 내레이션 녹음` };
+    return { ffmpeg, platform: `${process.platform} ${process.arch}`, stage: `${app.getVersion()} · 자막 꾸미기 · 빠른 내보내기` };
   });
   handle('media:import', () => withTask(async signal => {
     const result = await dialog.showOpenDialog(window, { title: '영상 가져오기', properties: ['openFile', 'multiSelections'], filters: [{ name: '영상', extensions: ['mp4', 'mov'] }, { name: '모든 파일', extensions: ['*'] }] });
@@ -173,10 +174,13 @@ app.whenReady().then(async () => {
   handle('project:restore', () => withTask(async signal => { savePath = null; return openPath(recoverySource, signal); }));
   handle('project:export', (input: unknown) => withTask(async signal => {
     const project = ProjectSchema.parse(input); engine.validate(project);
-    const result = await dialog.showSaveDialog(window, { title: 'MP4 내보내기 · 새 파일 이름', defaultPath: `${project.name}.mp4`, filters: [{ name: 'MP4 영상', extensions: ['mp4'] }] });
+    // Windows' native save dialog already asks to replace an existing file.
+    // The explicit property enables the same confirmation on Linux.
+    const result = await dialog.showSaveDialog(window, { title: 'MP4 내보내기', buttonLabel: '내보내기', defaultPath: `${project.name}.mp4`, properties: ['showOverwriteConfirmation'], filters: [{ name: 'MP4 영상', extensions: ['mp4'] }] });
     if (result.canceled || !result.filePath) return null;
-    progress({ kind: 'export', percent: 0, message: 'MP4 출력 준비' });
-    return engine.export(project, result.filePath, signal, p => progress({ kind: 'export', percent: p, message: p === 100 ? '출력 검증 완료' : 'MP4 내보내는 중' }));
+    const overwrite = await destinationStamp(result.filePath);
+    const messages = { prepare: '출력 준비 중', captions: '자막·꾸미기 준비 중', encode: '영상 만드는 중', verify: '완성 영상 확인 중', save: '파일 저장 중', done: '내보내기 완료' };
+    return engine.export(project, result.filePath, signal, (p, status) => progress({ kind: 'export', percent: p, message: messages[status?.stage ?? 'prepare'], exportStatus: status }), { overwrite });
   }));
   handle('task:cancel', () => { task?.abort(); });
   handle('media:frame', (id: unknown, frame: unknown, input: unknown, canvas: unknown, clipFraming: unknown) => {

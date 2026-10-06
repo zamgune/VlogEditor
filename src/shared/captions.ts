@@ -1,6 +1,9 @@
 import { z } from 'zod';
 import type { Project } from './project';
 import type { CanvasSettings } from './canvas';
+import { FontSchema, TextRunsSchema, validTextRuns } from './rich-text';
+import { DecorationSchema, decorationSpans, GradientSchema, type Decoration } from './decoration';
+export { CAPTION_FONTS, captionFontWeight } from './rich-text';
 
 const hex = z.string().regex(/^#[0-9a-f]{6}$/i);
 export const CaptionKindSchema = z.enum(['normal', 'emphasis', 'title']);
@@ -12,31 +15,22 @@ export type CaptionMotion = z.infer<typeof CaptionMotionSchema>;
 export const noMotion = (): CaptionMotion => ({ enter: { type: 'none', frames: 9, direction: 'up' }, exit: { type: 'none', frames: 9, direction: 'up' } });
 export const PositionSchema = z.object({ h: z.union([z.literal(0), z.literal(.5), z.literal(1)]), v: z.union([z.literal(0), z.literal(.5), z.literal(1)]), x: z.number().min(-2).max(3).nullable(), y: z.number().min(-2).max(3).nullable() }).strict();
 const styleFields = {
-  font: z.enum(['sans', 'serif', 'maruburi']), weight: z.number().int().min(100).max(900), size: z.number().min(16).max(200), color: hex,
+  font: FontSchema, weight: z.number().int().min(100).max(900), size: z.number().min(16).max(200), color: hex,
   outline: z.number().min(0).max(16), outlineColor: hex, outer: z.number().min(0).max(16), outerColor: hex,
-  background: hex, opacity: z.number().min(0).max(1), radius: z.number().min(0).max(60), padding: z.number().min(0).max(60), shadow: z.number().min(0).max(20),
+  background: hex, gradient: GradientSchema.nullable(), opacity: z.number().min(0).max(1), radius: z.number().min(0).max(60), padding: z.number().min(0).max(60), shadow: z.number().min(0).max(20),
   maxWidth: z.number().min(.2).max(1), position: PositionSchema,
   align: z.enum(['left', 'center', 'right']), lineHeight: z.number().min(1.2).max(2.4), motion: CaptionMotionSchema
 };
-export const CaptionStyleSchema = z.object(styleFields).extend({ align: styleFields.align.default('center'), lineHeight: styleFields.lineHeight.default(1.4), motion: CaptionMotionSchema.default(noMotion) }).strict();
+export const CaptionStyleSchema = z.object(styleFields).extend({ gradient: styleFields.gradient.default(null), align: styleFields.align.default('center'), lineHeight: styleFields.lineHeight.default(1.4), motion: CaptionMotionSchema.default(noMotion) }).strict();
 export type CaptionStyle = z.infer<typeof CaptionStyleSchema>;
-export const CAPTION_FONTS = {
-  sans: { label: '고딕 · Noto Sans KR', family: 'VlogSans', weights: [100, 200, 300, 400, 500, 600, 700, 800, 900] },
-  serif: { label: '명조 · Noto Serif KR', family: 'VlogSerif', weights: [100, 200, 300, 400, 500, 600, 700, 800, 900] },
-  maruburi: { label: '마루 부리 · Maru Buri', family: 'VlogMaruBuri', weights: [200, 300, 400, 600, 700] }
-} satisfies Record<CaptionStyle['font'], { label: string; family: string; weights: number[] }>;
-export function captionFontWeight(font: CaptionStyle['font'], weight: number) {
-  if (font !== 'maruburi') return weight;
-  return CAPTION_FONTS[font].weights.reduce((nearest, value) => Math.abs(value - weight) < Math.abs(nearest - weight) ? value : nearest);
-}
 export type CaptionPosition = z.infer<typeof PositionSchema>;
 // A project-wide title has clipId=null and no fixed range (0,0); its span follows the whole timeline.
 export const CaptionSchema = z.object({ id: z.string().uuid(), clipId: z.string().uuid().nullable(), kind: CaptionKindSchema,
-  text: z.string().max(2000), inFrame: z.number().int().nonnegative(), outFrame: z.number().int().nonnegative(), zOrder: z.number().int().nonnegative().max(1000000).default(0), overrides: z.object(styleFields).partial().strict() }).strict();
+  text: z.string().max(2000), runs: TextRunsSchema, inFrame: z.number().int().nonnegative(), outFrame: z.number().int().nonnegative(), zOrder: z.number().int().nonnegative().max(1000000).default(0), overrides: z.object(styleFields).partial().strict() }).strict().refine(c => validTextRuns(c.text, c.runs), '부분 글꼴 구간이 올바르지 않습니다.');
 export type Caption = z.infer<typeof CaptionSchema>;
 export const MarginsSchema = z.object({ horizontal: z.number().min(0).max(.3), top: z.number().min(0).max(.3), bottom: z.number().min(0).max(.4).nullable() }).strict();
 export type Margins = z.infer<typeof MarginsSchema>;
-const basic: CaptionStyle = { font: 'sans', weight: 600, size: 54, color: '#151515', outline: 0, outlineColor: '#111111', outer: 0, outerColor: '#ffffff', background: '#ffffff', opacity: .96, radius: 16, padding: 18, shadow: 0, maxWidth: .84, position: { h: .5, v: 1, x: null, y: null }, align: 'center', lineHeight: 1.4, motion: noMotion() };
+const basic: CaptionStyle = { font: 'sans', weight: 600, size: 54, color: '#151515', outline: 0, outlineColor: '#111111', outer: 0, outerColor: '#ffffff', background: '#ffffff', gradient: null, opacity: .96, radius: 16, padding: 18, shadow: 0, maxWidth: .84, position: { h: .5, v: 1, x: null, y: null }, align: 'center', lineHeight: 1.4, motion: noMotion() };
 export const PRESET_CATEGORIES = ['기본·대사', '감성·메모', '장소·정보', '강조·리액션', '제목·인트로'] as const;
 export type CaptionPreset = { id: string; name: string; kind: CaptionKind; style: CaptionStyle; category: typeof PRESET_CATEGORIES[number] };
 const originalPresets: Omit<CaptionPreset, 'category'>[] = [
@@ -72,60 +66,85 @@ export const defaultCaptionSettings = () => ({ normal: structuredClone(CAPTION_P
 export const CaptionSettingsSchema = z.object({ normal: CaptionStyleSchema, emphasis: CaptionStyleSchema, title: CaptionStyleSchema, margins: MarginsSchema }).strict();
 export const SavedCaptionStyleSchema = z.object({ id: z.string().uuid(), name: z.string().min(1).max(80), style: CaptionStyleSchema }).strict();
 export type SavedCaptionStyle = z.infer<typeof SavedCaptionStyleSchema>;
-export const CaptionGroupItemSchema = z.object({ kind: CaptionKindSchema, text: z.string().max(2000), style: CaptionStyleSchema,
+export const CaptionGroupItemSchema = z.object({ kind: CaptionKindSchema, text: z.string().max(2000), runs: TextRunsSchema, style: CaptionStyleSchema,
   startFrame: z.number().int().min(0).max(2592000), endFrame: z.number().int().min(0).max(2592000)
-}).strict().refine(item => item.kind === 'title' ? item.startFrame === 0 && item.endFrame === 0 : item.endFrame > item.startFrame, '그룹의 표시 구간이 올바르지 않습니다.');
-export const SavedCaptionGroupSchema = z.object({ id: z.string().uuid(), name: z.string().trim().min(1).max(80), items: z.array(CaptionGroupItemSchema).min(1).max(50) }).strict();
+}).strict().refine(item => validTextRuns(item.text, item.runs), '부분 글꼴 구간이 올바르지 않습니다.').refine(item => item.kind === 'title' ? item.startFrame === 0 && item.endFrame === 0 : item.endFrame > item.startFrame, '그룹의 표시 구간이 올바르지 않습니다.');
+export const CaptionGroupDecorationSchema = DecorationSchema.omit({ id: true, clipId: true, inFrame: true, outFrame: true, zOrder: true }).extend({
+  wholeTimeline: z.boolean(), startFrame: z.number().int().min(0).max(2592000), endFrame: z.number().int().min(0).max(2592000)
+}).strict().refine(item => item.wholeTimeline ? item.startFrame === 0 && item.endFrame === 0 : item.endFrame > item.startFrame, '꾸미기의 표시 구간이 올바르지 않습니다.');
+export const SavedCaptionGroupSchema = z.object({ id: z.string().uuid(), name: z.string().trim().min(1).max(80), items: z.array(CaptionGroupItemSchema).min(1).max(50), decorations: z.array(CaptionGroupDecorationSchema).max(50).default([]) }).strict();
 export type SavedCaptionGroup = z.infer<typeof SavedCaptionGroupSchema>;
-const LibrarySchema = z.object({ version: z.literal(2), styles: z.array(SavedCaptionStyleSchema).max(100), favorites: z.array(z.string().max(100)).max(120), groups: z.array(SavedCaptionGroupSchema).max(50) }).strict().superRefine((library, ctx) => {
+const LibrarySchema = z.object({ version: z.literal(4), styles: z.array(SavedCaptionStyleSchema).max(100), favorites: z.array(z.string().max(100)).max(120), groups: z.array(SavedCaptionGroupSchema).max(50), defaultGroupId: z.string().uuid().nullable().default(null) }).strict().superRefine((library, ctx) => {
   const valid = new Set([...CAPTION_PRESETS.map(p => `builtin:${p.id}`), ...library.styles.map(p => `user:${p.id}`)]);
   if (new Set(library.styles.map(p => p.id)).size !== library.styles.length || new Set(library.favorites).size !== library.favorites.length || library.favorites.some(id => !valid.has(id))) ctx.addIssue({ code: 'custom', message: '스타일 보관함 항목이 올바르지 않습니다.' });
   if (new Set(library.groups.map(g => g.id)).size !== library.groups.length) ctx.addIssue({ code: 'custom', message: '중복된 그룹입니다.' });
+  if (library.defaultGroupId && !library.groups.some(g => g.id === library.defaultGroupId)) ctx.addIssue({ code: 'custom', message: '기본 자막 스타일을 찾을 수 없습니다.' });
 });
 export const CaptionLibrarySchema = z.preprocess(value => {
-  if (Array.isArray(value)) return { version: 2, styles: value, favorites: [], groups: [] };
-  if (value && typeof value === 'object' && 'version' in value && value.version === 1) return { ...value, version: 2, groups: [] };
+  if (Array.isArray(value)) return { version: 4, styles: value, favorites: [], groups: [] };
+  if (value && typeof value === 'object' && 'version' in value && value.version === 1) return { ...value, version: 4, groups: [] };
+  if (value && typeof value === 'object' && 'version' in value && (value.version === 2 || value.version === 3)) return { ...value, version: 4 };
   return value;
 }, LibrarySchema);
 export type CaptionLibrary = z.infer<typeof CaptionLibrarySchema>;
-export const emptyCaptionLibrary = (): CaptionLibrary => ({ version: 2, styles: [], favorites: [], groups: [] });
+export const emptyCaptionLibrary = (): CaptionLibrary => ({ version: 4, styles: [], favorites: [], groups: [], defaultGroupId: null });
 
-export function captureCaptionGroup(p: Project, ids: string[], name: string): SavedCaptionGroup {
+export function captureCaptionGroup(p: Project, ids: string[], name: string, shapeIds: string[] = []): SavedCaptionGroup {
   const selected = new Set(ids), visible = new Set(captionSpans(p).map(s => s.caption.id));
   const captions = p.captions.filter(c => selected.has(c.id)).sort((a, b) => a.zOrder - b.zOrder);
   if (!captions.length || captions.length > 50 || captions.some(c => !visible.has(c.id))) throw new Error('화면에 표시되는 글을 1~50개 선택해 주세요.');
+  const chosenShapes = new Set(shapeIds), visibleShapes = new Set(decorationSpans(p).map(s => s.shape.id));
+  const shapes = p.decorations.filter(s => chosenShapes.has(s.id)).sort((a, b) => a.zOrder - b.zOrder);
+  if (shapes.length > 50 || shapes.some(s => !visibleShapes.has(s.id))) throw new Error('화면에 표시되는 도형을 최대 50개 선택해 주세요.');
   return SavedCaptionGroupSchema.parse({ id: crypto.randomUUID(), name, items: captions.map(c => {
     const style = structuredClone(effectiveStyle(p, c));
     const anchor = captionRect({ width: 0, height: 0 }, style, p.settings, p.captionSettings.margins);
     style.position = { ...style.position, x: anchor.left / p.settings.width, y: anchor.top / p.settings.height };
     const clip = p.clips.find(v => v.id === c.clipId);
-    return { kind: c.kind, text: c.text, style,
+    return { kind: c.kind, text: c.text, runs: structuredClone(c.runs), style,
       startFrame: clip ? Math.max(c.inFrame, clip.inFrame) - clip.inFrame : 0,
       endFrame: clip ? Math.min(c.outFrame, clip.outFrame) - clip.inFrame : 0 };
+  }), decorations: shapes.map(s => {
+    const { id: _, clipId, inFrame, outFrame, zOrder: __, ...appearance } = structuredClone(s);
+    const clip = p.clips.find(c => c.id === clipId);
+    return { ...appearance, wholeTimeline: !clip, startFrame: clip ? Math.max(inFrame, clip.inFrame) - clip.inFrame : 0, endFrame: clip ? Math.min(outFrame, clip.outFrame) - clip.inFrame : 0 };
   }) });
 }
-export function applyCaptionGroup(p: Project, input: SavedCaptionGroup, clipId?: string): { project: Project; ids: string[] } {
+// As a default subtitle, every component follows the new subtitle's visible interval.
+// Explicit group loading instead restores the saved kinds and clip-relative intervals.
+export function applyCaptionGroup(p: Project, input: SavedCaptionGroup, clipId?: string, subtitleFrame?: number): { project: Project; ids: string[]; shapeIds: string[] } {
   const group = SavedCaptionGroupSchema.parse(input), clip = p.clips.find(c => c.id === clipId);
-  if (!p.clips.length || (group.items.some(i => i.kind !== 'title') && !clip)) throw new Error('그룹을 넣을 영상을 먼저 선택해 주세요.');
+  const asSubtitle = subtitleFrame !== undefined;
+  if (asSubtitle && !Number.isFinite(subtitleFrame)) throw new Error('자막 시작 위치가 올바르지 않습니다.');
+  if (!p.clips.length || ((asSubtitle || group.items.some(i => i.kind !== 'title') || group.decorations.some(s => !s.wholeTimeline)) && !clip)) throw new Error('그룹을 넣을 영상을 먼저 선택해 주세요.');
   if (p.captions.length + group.items.length > 2000) throw new Error('프로젝트에는 글을 최대 2000개까지 넣을 수 있습니다.');
+  if (p.decorations.length + group.decorations.length > 500) throw new Error('프로젝트에는 도형을 최대 500개까지 넣을 수 있습니다.');
+  const interval = (startFrame: number, endFrame: number, wholeTimeline: boolean) => {
+    if (wholeTimeline && !asSubtitle) return { clipId: null, inFrame: 0, outFrame: 0 };
+    const length = clip!.outFrame - clip!.inFrame;
+    const start = Math.max(0, Math.min(asSubtitle ? Math.round(subtitleFrame!) - clip!.inFrame : startFrame, length - 1));
+    const end = asSubtitle ? length : Math.max(start + 1, Math.min(endFrame, length));
+    return { clipId: clip!.id, inFrame: clip!.inFrame + start, outFrame: clip!.inFrame + end };
+  };
   const order = nextOrder(p);
   const added: Caption[] = group.items.map((item, i) => {
-    const length = clip ? clip.outFrame - clip.inFrame : 0;
-    const start = Math.min(item.startFrame, Math.max(0, length - 1));
-    const end = Math.max(start + 1, Math.min(item.endFrame, length));
-    return { id: crypto.randomUUID(), kind: item.kind, text: item.text, clipId: item.kind === 'title' ? null : clip!.id,
-      inFrame: item.kind === 'title' ? 0 : clip!.inFrame + start, outFrame: item.kind === 'title' ? 0 : clip!.inFrame + end,
+    return { id: crypto.randomUUID(), kind: asSubtitle ? 'normal' : item.kind, text: item.text, runs: structuredClone(item.runs), ...interval(item.startFrame, item.endFrame, item.kind === 'title'),
       zOrder: order + i, overrides: structuredClone(item.style) };
   });
-  return { project: { ...p, captions: [...p.captions, ...added] }, ids: added.map(c => c.id) };
+  const shapeOrder = Math.max(-1, ...p.decorations.map(s => s.zOrder)) + 1;
+  const shapes: Decoration[] = group.decorations.map((item, i) => {
+    const { wholeTimeline, startFrame, endFrame, ...appearance } = structuredClone(item);
+    return { ...appearance, id: crypto.randomUUID(), ...interval(startFrame, endFrame, wholeTimeline), zOrder: shapeOrder + i };
+  });
+  return { project: { ...p, captions: [...p.captions, ...added], decorations: [...p.decorations, ...shapes] }, ids: added.map(c => c.id), shapeIds: shapes.map(s => s.id) };
 }
 export function presetPatch(style: CaptionStyle, includeLayout = false): Partial<CaptionStyle> {
   const copy = structuredClone(style);
   if (includeLayout) return copy;
   const { size: _, position: __, maxWidth: ___, ...appearance } = copy; return appearance;
 }
-export const CaptionRenderRequestSchema = z.object({ text: z.string().max(2000), style: CaptionStyleSchema, width: z.number().int().min(2).max(4096), height: z.number().int().min(2).max(4096) }).strict();
-export type CaptionRenderRequest = z.infer<typeof CaptionRenderRequestSchema>;
+export const CaptionRenderRequestSchema = z.object({ text: z.string().max(2000), runs: TextRunsSchema, style: CaptionStyleSchema, width: z.number().int().min(2).max(4096), height: z.number().int().min(2).max(4096) }).strict().refine(r => validTextRuns(r.text, r.runs), '부분 글꼴 구간이 올바르지 않습니다.');
+export type CaptionRenderRequest = Omit<z.output<typeof CaptionRenderRequestSchema>, 'runs'> & { runs?: z.output<typeof TextRunsSchema> };
 export type CaptionBitmap = { url: string; width: number; height: number; lines: number };
 export const effectiveStyle = (p: Project, c: Caption): CaptionStyle => ({ ...p.captionSettings[c.kind], ...c.overrides });
 export function captionRect(bitmap: Pick<CaptionBitmap, 'width' | 'height'>, style: CaptionStyle, settings: Pick<CanvasSettings, 'width' | 'height'>, margins: Margins) {
@@ -157,13 +176,13 @@ export function captionSpans(p: Project) {
 }
 export function addCaption(p: Project, clipId: string, kind: CaptionKind, sourceFrame: number): { project: Project; id: string } {
   if (kind === 'title') {
-    const c: Caption = { id: crypto.randomUUID(), clipId: null, kind, text: '나의 하루 기록', inFrame: 0, outFrame: 0, zOrder: nextOrder(p), overrides: {} };
+    const c: Caption = { id: crypto.randomUUID(), clipId: null, kind, text: '나의 하루 기록', runs: [], inFrame: 0, outFrame: 0, zOrder: nextOrder(p), overrides: {} };
     c.overrides = offsetNewCaption(p, c);
     return { project: { ...p, captions: [...p.captions, c] }, id: c.id };
   }
   const clip = p.clips.find(c => c.id === clipId)!;
   const at = Math.max(clip.inFrame, Math.min(clip.outFrame - 1, Math.round(sourceFrame)));
-  const caption: Caption = { id: crypto.randomUUID(), clipId, kind, text: kind === 'normal' ? '오늘의 작은 순간' : '이 순간!', inFrame: at, outFrame: kind === 'normal' ? clip.outFrame : Math.min(clip.outFrame, at + 60), zOrder: nextOrder(p), overrides: {} };
+  const caption: Caption = { id: crypto.randomUUID(), clipId, kind, text: kind === 'normal' ? '오늘의 작은 순간' : '이 순간!', runs: [], inFrame: at, outFrame: kind === 'normal' ? clip.outFrame : Math.min(clip.outFrame, at + 60), zOrder: nextOrder(p), overrides: {} };
   caption.overrides = offsetNewCaption(p, caption);
   return { project: { ...p, captions: [...p.captions, caption] }, id: caption.id };
 }
@@ -195,12 +214,55 @@ function offsetNewCaption(p: Project, caption: Caption): Partial<CaptionStyle> {
   }
   return x === rect.left / p.settings.width && y === rect.top / p.settings.height ? caption.overrides : { ...caption.overrides, position: { ...style.position, x, y } };
 }
-export function duplicateCaption(p: Project, id: string): { project: Project; id: string } {
+export type CaptionClipboard = { projectId: string; caption: Caption; durationFrames: number };
+export function copyCaption(p: Project, id: string): CaptionClipboard {
   const source = p.captions.find(c => c.id === id);
-  if (!source || p.captions.length >= 2000) return { project: p, id };
-  const copy = { ...structuredClone(source), id: crypto.randomUUID(), zOrder: nextOrder(p) };
-  copy.overrides = offsetNewCaption(p, copy);
-  return { project: { ...p, captions: [...p.captions, copy] }, id: copy.id };
+  if (!source) throw new Error('복사할 자막을 선택해 주세요.');
+  // Freeze inherited styles and resolved anchors, so pasting into another project keeps the design.
+  const item = captureCaptionGroup(p, [id], '복사한 자막').items[0];
+  return { projectId: p.id, caption: { ...structuredClone(source), overrides: item.style }, durationFrames: item.endFrame - item.startFrame };
+}
+function nextCaptionGap(p: Project, clipId: string, from: number, length: number) {
+  const clip = p.clips.find(c => c.id === clipId)!;
+  let at = Math.max(from, clip.inFrame);
+  const occupied = p.captions.filter(c => c.clipId === clipId).map(c => ({ start: Math.max(clip.inFrame, c.inFrame), end: Math.min(clip.outFrame, c.outFrame) })).filter(c => c.end > c.start).sort((a, b) => a.start - b.start);
+  for (const span of occupied) {
+    if (span.end <= at) continue;
+    if (at + length <= span.start) return at;
+    at = Math.max(at, span.end);
+  }
+  return at + length <= clip.outFrame ? at : null;
+}
+export function pasteCaption(p: Project, copied: CaptionClipboard, options: { autoAfter?: boolean; clipId?: string; sourceFrame?: number } = {}): { project: Project; id: string; movedAfter: boolean } {
+  if (p.captions.length >= 2000) throw new Error('프로젝트에는 글을 최대 2000개까지 넣을 수 있습니다.');
+  if (!p.clips.length) throw new Error('자막을 붙여넣을 영상을 먼저 선택해 주세요.');
+  const source = copied.caption, copy: Caption = { ...structuredClone(source), id: crypto.randomUUID(), zOrder: nextOrder(p) };
+  let movedAfter = false;
+  if (source.kind !== 'title') {
+    const clip = p.clips.find(c => c.id === options.clipId) ?? (copied.projectId === p.id ? p.clips.find(c => c.id === source.clipId) : undefined);
+    if (!clip) throw new Error('자막을 붙여넣을 영상을 먼저 선택해 주세요.');
+    const sameClip = copied.projectId === p.id && source.clipId === clip.id;
+    const visibleStart = Math.max(source.inFrame, clip.inFrame), visibleEnd = Math.min(source.outFrame, clip.outFrame);
+    const hasOriginalRange = sameClip && visibleEnd > visibleStart;
+    copy.clipId = clip.id;
+    if (!hasOriginalRange) {
+      const frame = Number.isFinite(options.sourceFrame) ? Math.round(options.sourceFrame!) : clip.inFrame;
+      copy.inFrame = Math.max(clip.inFrame, Math.min(clip.outFrame - 1, frame));
+      copy.outFrame = Math.min(clip.outFrame, copy.inFrame + copied.durationFrames);
+    }
+    if (options.autoAfter && hasOriginalRange) {
+      const length = visibleEnd - visibleStart, next = nextCaptionGap(p, clip.id, visibleEnd, length);
+      if (next !== null) { copy.inFrame = next; copy.outFrame = next + length; movedAfter = true; }
+    }
+  }
+  // Sequential copies keep their screen position. Overlapping copies remain easy to select.
+  if (!movedAfter) copy.overrides = offsetNewCaption(p, copy);
+  return { project: { ...p, captions: [...p.captions, copy] }, id: copy.id, movedAfter };
+}
+export function duplicateCaption(p: Project, id: string, autoAfter = false): { project: Project; id: string; movedAfter: boolean } {
+  const source = p.captions.find(c => c.id === id);
+  if (!source || p.captions.length >= 2000) return { project: p, id, movedAfter: false };
+  return pasteCaption(p, copyCaption(p, id), { autoAfter, clipId: source.clipId ?? undefined });
 }
 export function reorderCaption(p: Project, id: string, direction: -1 | 1, frame?: number): Project {
   const spans = captionSpans(p), target = spans.find(s => s.caption.id === id); if (!target) return p;

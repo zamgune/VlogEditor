@@ -4,7 +4,7 @@ import { join, resolve } from 'node:path';
 import { MediaEngine } from '../electron/media';
 import { binPath, run } from '../electron/process';
 import { addMedia, newProject, trim } from '../src/shared/project';
-import { colorMatrix, NEUTRAL_COLOR } from '../src/shared/color';
+import { colorFilter, colorMatrix, NEUTRAL_COLOR, type Color } from '../src/shared/color';
 import { atomicSave, readProject } from '../electron/storage';
 
 const root = resolve('.');
@@ -36,6 +36,29 @@ assert.ok(stillPixel.every((value, i) => Math.abs(value - corrected[i]) <= 3));
 const gray = await engine.still(media.id, 0, { ...NEUTRAL_COLOR, saturation: -100 });
 const grayPath = join(dir, '흑백 미리보기.png'); await writeFile(grayPath, Buffer.from(gray.split(',')[1], 'base64'));
 const grayPixel = await pixel(grayPath, 0); assert.ok(Math.max(...grayPixel) - Math.min(...grayPixel) <= 1);
+// Compare the accelerated mixer against the original single-clamp RGB formula
+// on a colored test pattern, including negative offsets, clipping, and gains
+// beyond the mixer's range (which must keep using the expression fallback).
+const matrixChecks = [];
+for (const color of [
+  { brightness: 15, contrast: 20, saturation: -20, warmth: 10 },
+  { brightness: -100, contrast: 100, saturation: -100, warmth: -100 },
+  { brightness: 100, contrast: -100, saturation: 50, warmth: 100 },
+  { brightness: -35, contrast: -50, saturation: -70, warmth: 80 },
+  { brightness: 0, contrast: 100, saturation: 100, warmth: 0 },
+] satisfies Color[]) {
+  const matrix = colorMatrix(color), channels = ['r', 'g', 'b'];
+  const expressions = channels.map((channel, row) => `${channel}='clip(${channels.map((c, col) => `${matrix[row * 5 + col].toFixed(8)}*${c}(X,Y)`).join('+')}+${(matrix[row * 5 + 4] * 255).toFixed(8)},0,255)'`);
+  const reference = `scale=iw:ih:in_color_matrix=bt709:in_range=tv:out_range=full,format=gbrp,setparams=range=full,geq=${expressions.join(':')}:interpolation=nearest,scale=iw:ih:out_color_matrix=bt709:in_range=full:out_range=tv,format=yuv420p,setparams=colorspace=bt709:range=limited`;
+  const render = async (filter: string) => (await run(ffmpeg, ['-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=96x64:rate=30:duration=0.1', '-vf', `${filter},format=rgb24`, '-frames:v', '1', '-f', 'rawvideo', 'pipe:1'])).stdout;
+  const before = await render(reference), after = await render(colorFilter(color));
+  assert.equal(after.length, before.length);
+  const differences = [...after].map((v, i) => Math.abs(v - before[i]));
+  const mean = differences.reduce((a, b) => a + b, 0) / differences.length, max = Math.max(...differences);
+  assert.ok(mean < 1.6 && max <= 5, JSON.stringify({ color, mean, max }));
+  matrixChecks.push({ color, mean, max, accelerated: colorFilter(color).includes('colorchannelmixer') });
+}
 const report = { output, saved, corrected, neutral, expected, stillPixel, grayPixel,
+  matrixChecks,
   checks: ['same source different clip corrections', 'shared matrix expected pixels within 4/255', 'still vs export within 3/255', 'saturation -100 is grayscale', 'save/reopen color values'] };
 await writeFile(join(dir, 'report.json'), JSON.stringify(report, null, 2)); console.log(JSON.stringify(report, null, 2));

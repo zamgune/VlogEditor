@@ -8,6 +8,7 @@ import { readProject } from '../electron/storage';
 // Run against an extracted release ZIP after its first-run setup, without app dependencies.
 const directory = resolve(process.argv[2]);
 const appRoot = join(directory, 'resources/app');
+const { version } = JSON.parse(await readFile(join(appRoot, 'package.json'), 'utf8'));
 const out = join(resolve('output'), `package-${Date.now()}`);
 await mkdir(out, { recursive: true });
 const video = join(out, 'sample.mp4'), microphone = join(out, 'microphone.wav');
@@ -19,9 +20,9 @@ const errors: string[] = [];
 try {
   const page = await application.firstWindow();
   page.on('pageerror', error => errors.push(error.message));
-  await expect(page.locator('.milestone')).toContainText('버전 0.3.0');
+  await expect(page.locator('.milestone')).toContainText(`버전 ${version}`);
   const status = await page.evaluate(() => window.editor.status());
-  expect(status.ffmpeg).toBe(true); expect(status.stage).toContain('0.3.0');
+  expect(status.ffmpeg).toBe(true); expect(status.stage).toContain(version);
   expect(await application.evaluate(({ app }) => app.isPackaged)).toBe(true);
   await application.evaluate(({ dialog }, path) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] }); }, video);
   await page.getByRole('button', { name: '＋ 영상 가져오기' }).click();
@@ -59,6 +60,6 @@ try {
   expect(Number(metadata.streams.find(s => s.codec_type === 'audio')?.duration)).toBeCloseTo(2, 1);
   expect(errors).toEqual([]);
   await page.screenshot({ path: join(out, 'release-preview.png') });
-  await writeFile(join(out, 'report.json'), JSON.stringify({ version: '0.3.0', packaged: true, directory, status, projectPath, exported, errors }, null, 2));
+  await writeFile(join(out, 'report.json'), JSON.stringify({ version, packaged: true, directory, status, projectPath, exported, errors }, null, 2));
   console.log(`Packaged app passed: ${out}`);
 } finally { await application.close(); }
